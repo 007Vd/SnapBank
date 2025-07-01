@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "658569263851",
+    "project_id": "snapbank-580f6",
+    "storage_bucket": "snapbank-580f6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:658569263851:android:924f7ccdf6456d13069cae",
+        "android_client_info": {
+          "package_name": "com.example.snapbank"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUg4wRyeIKGwNbpb1s9Vqv21Z-9O2ZsD0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
