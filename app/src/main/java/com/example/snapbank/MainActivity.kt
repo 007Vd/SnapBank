@@ -180,7 +180,10 @@ fun SendMoneyScreen(senderUid: String) {
     val db = FirebaseFirestore.getInstance()
     val context = LocalContext.current
 
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(modifier = Modifier.padding(16.dp)
+        .fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
         Text("📤 Send Money", fontSize = 20.sp)
         Spacer(Modifier.height(16.dp))
 
@@ -371,10 +374,11 @@ fun DashboardScreen() {
             .fillMaxSize()
             .background(gradient)
             .padding(24.dp),
-        contentAlignment = Alignment.TopCenter
+        contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
             modifier = Modifier
                 .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
                 .padding(24.dp)
