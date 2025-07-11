@@ -2,7 +2,7 @@ package com.example.snapbank
 
 import android.app.Activity
 import com.google.firebase.firestore.SetOptions
-
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -25,17 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.snapbank.ui.theme.SnapBankTheme
 import com.google.firebase.FirebaseException
 import com.google.firebase.auth.*
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import java.util.concurrent.TimeUnit
-
-
-
-
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,12 +92,10 @@ fun AppFlow(activity: Activity) {
             currentScreen = "dashboard"
         }
 
-//        "dashboard" -> DashboardScreen()
         "dashboard" -> MainNavigationScreen(uid)
-
-        "home" -> HomeScreen()
     }
 }
+
 @Composable
 fun MainNavigationScreen(uid: String) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -119,8 +116,7 @@ fun MainNavigationScreen(uid: String) {
                                 "Settings" -> Icon(Icons.Filled.Settings, contentDescription = label)
                                 else -> Icon(Icons.Filled.Info, contentDescription = label)
                             }
-                        }
-                        ,
+                        },
                         label = { Text(label) }
                     )
                 }
@@ -129,7 +125,7 @@ fun MainNavigationScreen(uid: String) {
     ) { padding ->
         Box(modifier = Modifier.padding(padding)) {
             when (selectedTab) {
-                0 -> DashboardScreen()
+                0 -> DashboardScreen(uid)
                 1 -> TransactionsScreen(uid)
                 2 -> SendMoneyScreen(uid)
                 3 -> SettingsScreen()
@@ -140,7 +136,9 @@ fun MainNavigationScreen(uid: String) {
 
 @Composable
 fun TransactionsScreen(uid: String) {
-    var transactions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var transactions by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf("") }
     val db = FirebaseFirestore.getInstance()
 
     LaunchedEffect(Unit) {
@@ -149,11 +147,22 @@ fun TransactionsScreen(uid: String) {
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { docs ->
-                transactions = docs.mapNotNull {
-                    val type = it.getString("type") ?: return@mapNotNull null
-                    val amount = it.getLong("amount") ?: return@mapNotNull null
-                    "$type ₹$amount"
+                transactions = docs.mapNotNull { doc ->
+                    val type = doc.getString("type") ?: return@mapNotNull null
+                    val amount = doc.getLong("amount") ?: return@mapNotNull null
+                    val timestamp = doc.getLong("timestamp") ?: return@mapNotNull null
+                    mapOf(
+                        "type" to type,
+                        "amount" to amount,
+                        "timestamp" to timestamp
+                    )
                 }
+                isLoading = false
+            }
+            .addOnFailureListener { exception ->
+                errorMessage = "Failed to load transactions: ${exception.message}"
+                isLoading = false
+                Log.e("TRANSACTIONS", "Error loading transactions", exception)
             }
     }
 
@@ -163,13 +172,57 @@ fun TransactionsScreen(uid: String) {
             .padding(16.dp)
     ) {
         Text("📜 Transaction History", fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        transactions.forEach {
-            Text(it)
-            Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        when {
+            isLoading -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+            errorMessage.isNotEmpty() -> {
+                Text(
+                    text = "❌ $errorMessage",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            transactions.isEmpty() -> {
+                Text(
+                    text = "💳 No transactions yet",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            else -> {
+                transactions.forEach { transaction ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = transaction["type"] as String,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "₹${transaction["amount"]}",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
 @Composable
 fun SendMoneyScreen(senderUid: String) {
     var recipient by remember { mutableStateOf("") }
@@ -180,115 +233,190 @@ fun SendMoneyScreen(senderUid: String) {
     val db = FirebaseFirestore.getInstance()
     val context = LocalContext.current
 
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         Text("📤 Send Money", fontSize = 20.sp)
         Spacer(Modifier.height(16.dp))
 
         OutlinedTextField(
             value = recipient,
-            onValueChange = { recipient = it },
-            label = { Text("Recipient Username") }
+            onValueChange = {
+                recipient = it
+                status = "" // Clear status on input change
+            },
+            label = { Text("Recipient Username") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
         )
         Spacer(Modifier.height(8.dp))
 
         OutlinedTextField(
             value = amountText,
-            onValueChange = { amountText = it },
-            label = { Text("Amount") }
+            onValueChange = {
+                amountText = it
+                status = "" // Clear status on input change
+            },
+            label = { Text("Amount") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true
         )
         Spacer(Modifier.height(16.dp))
 
         Button(
             onClick = {
+                // Enhanced input validation
                 val amount = amountText.toLongOrNull()
-                if (amount == null || recipient.isBlank()) {
-                    status = "⚠️ Enter valid recipient and amount"
-                    return@Button
-                }
-
-                sending = true
-                db.collection("users")
-                    .whereEqualTo("username", recipient)
-                    .get()
-                    .addOnSuccessListener { docs ->
-                        if (docs.isEmpty) {
-                            status = "❌ User not found"
+                when {
+                    recipient.isBlank() -> {
+                        status = "⚠️ Please enter recipient username"
+                        return@Button
+                    }
+                    recipient.length < 3 -> {
+                        status = "⚠️ Username must be at least 3 characters"
+                        return@Button
+                    }
+                    amount == null || amount <= 0 -> {
+                        status = "⚠️ Please enter a valid amount"
+                        return@Button
+                    }
+                    amount > 100000 -> {
+                        status = "⚠️ Maximum transfer limit is ₹1,00,000"
+                        return@Button
+                    }
+                    amount < 1 -> {
+                        status = "⚠️ Minimum transfer amount is ₹1"
+                        return@Button
+                    }
+                    else -> {
+                        // Proceed with transfer
+                        sending = true
+                        performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
+                            status = message
                             sending = false
-                            return@addOnSuccessListener
-                        }
-
-                        val recipientDoc = docs.first()
-                        val recipientUid = recipientDoc.id
-
-                        val senderRef = db.collection("users").document(senderUid)
-                        val recipientRef = db.collection("users").document(recipientUid)
-
-                        db.runTransaction { transaction ->
-                            val senderSnapshot = transaction.get(senderRef)
-                            val recipientSnapshot = transaction.get(recipientRef)
-
-                            val senderBalance = senderSnapshot.getLong("balance") ?: 0L
-                            val recipientBalance = recipientSnapshot.getLong("balance") ?: 0L
-
-                            if (senderBalance < amount) {
-                                throw Exception("Insufficient balance")
+                            if (success) {
+                                amountText = ""
+                                recipient = ""
                             }
-
-                            // ✅ Always update directly
-                            transaction.update(senderRef, "balance", senderBalance - amount)
-                            transaction.update(recipientRef, "balance", recipientBalance + amount)
-
-                            val senderTxn = hashMapOf(
-                                "type" to "Sent to $recipient",
-                                "amount" to amount,
-                                "timestamp" to System.currentTimeMillis()
-                            )
-                            val recipientTxn = hashMapOf(
-                                "type" to "Received from ${senderSnapshot.getString("username") ?: "Unknown"}",
-                                "amount" to amount,
-                                "timestamp" to System.currentTimeMillis()
-                            )
-
-                            transaction.set(
-                                senderRef.collection("transactions").document(),
-                                senderTxn
-                            )
-                            transaction.set(
-                                recipientRef.collection("transactions").document(),
-                                recipientTxn
-                            )
-                        }.addOnSuccessListener {
-                            status = "✅ ₹$amount sent to $recipient"
-                            amountText = ""
-                            recipient = ""
-                            sending = false
-                            Toast.makeText(context, status, Toast.LENGTH_SHORT).show()
-                        }.addOnFailureListener {
-                            status = "❌ ${it.message}"
-                            sending = false
-                            Toast.makeText(context, status, Toast.LENGTH_SHORT).show()
                         }
                     }
-                    .addOnFailureListener {
-                        status = "❌ ${it.message}"
-                        sending = false
-                    }
+                }
             },
-            enabled = !sending
+            enabled = !sending,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (sending) "Sending..." else "Send")
+            Text(if (sending) "Sending..." else "Send Money")
         }
 
         if (status.isNotEmpty()) {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(status)
+            Text(
+                text = status,
+                color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
+            )
         }
     }
+}
+
+private fun performMoneyTransfer(
+    senderUid: String,
+    recipient: String,
+    amount: Long,
+    db: FirebaseFirestore,
+    context: Context,
+    onComplete: (Boolean, String) -> Unit
+) {
+    db.collection("users")
+        .whereEqualTo("username", recipient)
+        .get()
+        .addOnSuccessListener { docs ->
+            if (docs.isEmpty) {
+                onComplete(false, "❌ User not found")
+                return@addOnSuccessListener
+            }
+
+            val recipientDoc = docs.first()
+            val recipientUid = recipientDoc.id
+
+            if (senderUid == recipientUid) {
+                onComplete(false, "❌ Cannot send money to yourself")
+                return@addOnSuccessListener
+            }
+
+            val senderRef = db.collection("users").document(senderUid)
+            val recipientRef = db.collection("users").document(recipientUid)
+
+            db.runTransaction { transaction ->
+                val senderSnapshot = transaction.get(senderRef)
+                val recipientSnapshot = transaction.get(recipientRef)
+
+                val senderBalance = senderSnapshot.getLong("balance") ?: 0L
+                val recipientBalance = recipientSnapshot.getLong("balance") ?: 0L
+
+                if (senderBalance < amount) {
+                    throw Exception("Insufficient balance")
+                }
+
+                // Update balances
+                transaction.update(senderRef, "balance", senderBalance - amount)
+                transaction.update(recipientRef, "balance", recipientBalance + amount)
+
+                // Create transaction records
+                val timestamp = System.currentTimeMillis()
+                val senderTxn = hashMapOf(
+                    "type" to "Sent to $recipient",
+                    "amount" to amount,
+                    "timestamp" to timestamp
+                )
+                val recipientTxn = hashMapOf(
+                    "type" to "Received from ${senderSnapshot.getString("username") ?: "Unknown"}",
+                    "amount" to amount,
+                    "timestamp" to timestamp
+                )
+
+                transaction.set(
+                    senderRef.collection("transactions").document(),
+                    senderTxn
+                )
+                transaction.set(
+                    recipientRef.collection("transactions").document(),
+                    recipientTxn
+                )
+            }.addOnSuccessListener {
+                val successMessage = "✅ ₹$amount sent to $recipient"
+                onComplete(true, successMessage)
+                Toast.makeText(context, successMessage, Toast.LENGTH_SHORT).show()
+            }.addOnFailureListener { exception ->
+                val errorMessage = when (exception) {
+                    is FirebaseFirestoreException -> {
+                        when (exception.code) {
+                            FirebaseFirestoreException.Code.PERMISSION_DENIED -> "❌ Permission denied"
+                            FirebaseFirestoreException.Code.UNAVAILABLE -> "❌ Service unavailable"
+                            else -> "❌ ${exception.message}"
+                        }
+                    }
+                    else -> "❌ ${exception.message}"
+                }
+                onComplete(false, errorMessage)
+                Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
+                Log.e("SEND_MONEY", "Transfer failed", exception)
+            }
+        }
+        .addOnFailureListener { exception ->
+            val errorMessage = "❌ Failed to find user: ${exception.message}"
+            onComplete(false, errorMessage)
+            Log.e("SEND_MONEY", "User lookup failed", exception)
+        }
 }
 
 @Composable
 fun SettingsScreen() {
     val context = LocalContext.current
+    val user = FirebaseAuth.getInstance().currentUser
 
     Column(
         modifier = Modifier
@@ -298,15 +426,40 @@ fun SettingsScreen() {
     ) {
         Text("⚙️ Settings", fontSize = 24.sp)
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = {
-            FirebaseAuth.getInstance().signOut()
-            Toast.makeText(context, "Logged out", Toast.LENGTH_SHORT).show()
-            (context as? Activity)?.recreate()
-        }) {
+
+        // User info card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("👤 Account Info", fontSize = 18.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Name: ${user?.displayName ?: "Unknown"}")
+                Text("Phone: ${user?.phoneNumber ?: "Unknown"}")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = {
+                FirebaseAuth.getInstance().signOut()
+                Toast.makeText(context, "✅ Logged out successfully", Toast.LENGTH_SHORT).show()
+                (context as? Activity)?.recreate()
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error
+            )
+        ) {
             Text("🚪 Logout")
         }
     }
 }
+
 fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
     val db = FirebaseFirestore.getInstance()
     val userRef = db.collection("users").document(uid)
@@ -323,24 +476,26 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
         )
         transaction.set(userRef.collection("transactions").document(), txn)
     }.addOnSuccessListener {
-        onComplete(true, "Money added!")
-    }.addOnFailureListener {
-        onComplete(false, it.message ?: "Failed")
+        onComplete(true, "✅ ₹$amount added successfully!")
+    }.addOnFailureListener { exception ->
+        onComplete(false, "❌ Failed to add money: ${exception.message}")
+        Log.e("ADD_MONEY", "Failed to add money", exception)
     }
 }
+
 @Composable
-fun DashboardScreen() {
+fun DashboardScreen(uid: String) {
     val user = FirebaseAuth.getInstance().currentUser
     val name = user?.displayName ?: "User"
-    val uid = user?.uid
-
-    if (uid == null) {
-        Log.e("DASHBOARD", "❌ UID is null. User might not be logged in.")
-        return
-    }
 
     val db = FirebaseFirestore.getInstance()
     val balanceState = remember { mutableStateOf<Long?>(null) }
+    val context = LocalContext.current
+
+    // Add Money Dialog State
+    var showAddMoneyDialog by remember { mutableStateOf(false) }
+    var addAmount by remember { mutableStateOf("") }
+    var addingMoney by remember { mutableStateOf(false) }
 
     // 👂 Real-time listener for balance changes
     LaunchedEffect(uid) {
@@ -351,10 +506,11 @@ fun DashboardScreen() {
                 balanceState.value = -1L
                 return@addSnapshotListener
             }
+
             if (snapshot != null && snapshot.exists()) {
                 val updatedBalance = snapshot.getLong("balance") ?: 0L
                 balanceState.value = updatedBalance
-                Log.d("DASHBOARD", "✅ Live update: ₹$updatedBalance")
+                Log.d("DASHBOARD", "✅ Balance updated: ₹$updatedBalance")
             } else {
                 balanceState.value = -1L
                 Log.w("DASHBOARD", "⚠️ Snapshot is null or does not exist")
@@ -386,9 +542,92 @@ fun DashboardScreen() {
             when (val balance = balanceState.value) {
                 null -> CircularProgressIndicator()
                 -1L -> Text("❌ Error loading balance", color = Color.Red)
-                else -> Text("💰 Balance: ₹$balance", fontSize = 20.sp)
+                else -> {
+                    Text("💰 Current Balance", fontSize = 16.sp, color = Color(0xFF006064))
+                    Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Add Money Button
+            Button(
+                onClick = { showAddMoneyDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF00695C)
+                )
+            ) {
+                Text("➕ Add Money", fontSize = 16.sp)
             }
         }
+    }
+
+    // Add Money Dialog
+    if (showAddMoneyDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!addingMoney) {
+                    showAddMoneyDialog = false
+                    addAmount = ""
+                }
+            },
+            title = { Text("💰 Add Money") },
+            text = {
+                Column {
+                    Text("Enter amount to add to your wallet:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = addAmount,
+                        onValueChange = { addAmount = it },
+                        label = { Text("Amount") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        enabled = !addingMoney
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amount = addAmount.toLongOrNull()
+                        when {
+                            amount == null || amount <= 0 -> {
+                                Toast.makeText(context, "⚠️ Enter a valid amount", Toast.LENGTH_SHORT).show()
+                            }
+                            amount > 50000 -> {
+                                Toast.makeText(context, "⚠️ Maximum add limit is ₹50,000", Toast.LENGTH_SHORT).show()
+                            }
+                            else -> {
+                                addingMoney = true
+                                addMoney(uid, amount) { success, message ->
+                                    addingMoney = false
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    if (success) {
+                                        showAddMoneyDialog = false
+                                        addAmount = ""
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    enabled = !addingMoney
+                ) {
+                    Text(if (addingMoney) "Adding..." else "Add Money")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAddMoneyDialog = false
+                        addAmount = ""
+                    },
+                    enabled = !addingMoney
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -418,36 +657,59 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             if (message.isNotEmpty()) {
-                Text(message, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = message,
+                    color = if (message.startsWith("✅")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
             if (!otpSent) {
                 OutlinedTextField(
                     value = phone,
-                    onValueChange = { phone = it },
+                    onValueChange = {
+                        phone = it
+                        message = "" // Clear message on input change
+                    },
                     label = { Text("Phone Number") },
                     placeholder = { Text("+91XXXXXXXXXX") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        if (phone.isBlank()) {
-                            message = "⚠️ Enter a valid number"
-                            return@Button
-                        }
-                        loading = true
-                        sendVerificationCode(phone, activity,
-                            onSent = {
-                                loading = false
-                                otpSent = true
-                            },
-                            onError = {
-                                message = it
-                                loading = false
+                        when {
+                            phone.isBlank() -> {
+                                message = "⚠️ Enter a valid phone number"
+                                return@Button
                             }
-                        )
+                            !phone.startsWith("+91") -> {
+                                message = "⚠️ Phone number must start with +91"
+                                return@Button
+                            }
+                            phone.length != 13 -> {
+                                message = "⚠️ Phone number must be 10 digits after +91"
+                                return@Button
+                            }
+                            else -> {
+                                loading = true
+                                message = ""
+                                sendVerificationCode(phone, activity,
+                                    onSent = {
+                                        loading = false
+                                        otpSent = true
+                                        message = "✅ OTP sent successfully"
+                                    },
+                                    onError = { error ->
+                                        message = "❌ $error"
+                                        loading = false
+                                    }
+                                )
+                            }
+                        }
                     },
                     enabled = !loading,
                     shape = RoundedCornerShape(12.dp),
@@ -458,33 +720,56 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
             } else {
                 OutlinedTextField(
                     value = otpCode,
-                    onValueChange = { otpCode = it },
+                    onValueChange = {
+                        otpCode = it
+                        message = "" // Clear message on input change
+                    },
                     label = { Text("Enter OTP") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        if (otpCode.length < 6) {
-                            message = "⚠️ Invalid OTP"
-                            return@Button
-                        }
-                        loading = true
-                        verifyCode(otpCode,
-                            onSuccess = {
-                                loading = false
-                                onLoginSuccess(it)
-                            },
-                            onFailure = {
-                                message = it
-                                loading = false
+                        when {
+                            otpCode.length != 6 -> {
+                                message = "⚠️ OTP must be 6 digits"
+                                return@Button
                             }
-                        )
+                            else -> {
+                                loading = true
+                                message = ""
+                                verifyCode(otpCode,
+                                    onSuccess = { uid ->
+                                        loading = false
+                                        message = "✅ Login successful"
+                                        onLoginSuccess(uid)
+                                    },
+                                    onFailure = { error ->
+                                        message = "❌ $error"
+                                        loading = false
+                                    }
+                                )
+                            }
+                        }
                     },
+                    enabled = !loading,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (loading) "Verifying..." else "Verify")
+                    Text(if (loading) "Verifying..." else "Verify OTP")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = {
+                        otpSent = false
+                        otpCode = ""
+                        message = ""
+                    }
+                ) {
+                    Text("← Back to Phone Number")
                 }
             }
         }
@@ -546,125 +831,60 @@ fun UserDetailsScreen(uid: String, onSubmit: () -> Unit) {
 
             Button(
                 onClick = {
-                    if (name.isBlank() || username.isBlank()) {
-                        message = "⚠️ Both fields are required"
-                        return@Button
+                    when {
+                        name.isBlank() -> {
+                            message = "⚠️ Name is required"
+                            return@Button
+                        }
+                        name.length < 2 -> {
+                            message = "⚠️ Name must be at least 2 characters"
+                            return@Button
+                        }
+                        username.isBlank() -> {
+                            message = "⚠️ Username is required"
+                            return@Button
+                        }
+                        username.length < 3 -> {
+                            message = "⚠️ Username must be at least 3 characters"
+                            return@Button
+                        }
+                        !username.matches(Regex("^[a-zA-Z0-9_]+$")) -> {
+                            message = "⚠️ Username can only contain letters, numbers, and underscores"
+                            return@Button
+                        }
+                        else -> {
+                            loading = true
+                            message = ""
+                            saveUserDataToFirestore(uid, name, username) { success, errorMsg ->
+                                loading = false
+                                if (success) {
+                                    Log.d("DEBUG", "Moving to next screen")
+                                    Toast.makeText(context, "✅ Profile created successfully", Toast.LENGTH_SHORT).show()
+                                    onSubmit()
+                                } else {
+                                    message = errorMsg
+                                }
+                            }
+                        }
                     }
-                    loading = true
-                    saveUserDataToFirestore(uid, name, username) {
-                        Log.d("DEBUG", "Moving to next screen")
-                        Toast.makeText(context, "✅ Details saved", Toast.LENGTH_SHORT).show()
-                        onSubmit()
-                    }
-
                 },
                 enabled = !loading,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (loading) "Saving..." else "Submit")
+                Text(if (loading) "Saving..." else "Create Profile")
             }
 
             if (message.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = message, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
 }
-
-@Composable
-fun WelcomeScreen(onContinue: () -> Unit) {
-    val gradient = Brush.verticalGradient(listOf(Color(0xFFee9ca7), Color(0xFFffdde1)))
-
-    Box(
-        modifier = Modifier.fillMaxSize().background(gradient),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(24.dp)
-                .background(Color.White.copy(alpha = 0.9f), shape = RoundedCornerShape(20.dp))
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("🎊 You're all set!", fontSize = 26.sp, color = Color(0xFF6A0572))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Thanks for registering with SnapBank.", fontSize = 16.sp)
-            Spacer(modifier = Modifier.height(32.dp))
-            Button(onClick = onContinue, shape = RoundedCornerShape(12.dp)) {
-                Text("Continue")
-            }
-        }
-    }
-}
-
-@Composable
-fun HomeScreen() {
-    val context = LocalContext.current
-    val user = FirebaseAuth.getInstance().currentUser
-    val uid = user?.uid ?: return
-    var name by remember { mutableStateOf(user.displayName ?: "User") }
-    var balance by remember { mutableStateOf<Long?>(null) }
-
-    val db = FirebaseFirestore.getInstance()
-
-    LaunchedEffect(uid) {
-        db.collection("users").document(uid).get()
-            .addOnSuccessListener { doc ->
-                name = doc.getString("name") ?: name
-                balance = doc.getLong("balance") ?: 0
-            }
-            .addOnFailureListener {
-                Toast.makeText(context, "⚠️ Failed to load balance", Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    val gradient = Brush.verticalGradient(
-        colors = listOf(Color(0xFF00b09b), Color(0xFF96c93d))
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(gradient),
-        contentAlignment = Alignment.TopCenter
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .padding(top = 64.dp, start = 24.dp, end = 24.dp)
-                .background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(20.dp))
-                .padding(24.dp)
-                .fillMaxWidth()
-        ) {
-            Text("👋 Hello, $name", fontSize = 24.sp, color = Color(0xFF0B5345))
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (balance != null) {
-                Text("💰 Balance", fontSize = 20.sp, color = Color(0xFF117864))
-                Text("₹${balance}", fontSize = 32.sp, color = Color(0xFF1A5276))
-            } else {
-                CircularProgressIndicator()
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Button(onClick = { /* add money */ }) {
-                    Text("➕ Add Money")
-                }
-                Button(onClick = { /* send money */ }) {
-                    Text("📤 Send Money")
-                }
-            }
-        }
-    }
-}
-
 
 fun sendVerificationCode(
     phoneNumber: String,
@@ -724,51 +944,63 @@ fun signInWithPhoneAuthCredential(
             }
         }
 }
+
 fun saveUserDataToFirestore(
     uid: String,
     name: String,
     username: String,
-    onSuccess: () -> Unit
+    onComplete: (Boolean, String) -> Unit
 ) {
     val db = FirebaseFirestore.getInstance()
-    val userMap = hashMapOf(
-        "name" to name,
-        "username" to username,
-        "balance" to 1000L  // 🪙 Add initial balance if not present
-    )
 
+    // First check if username already exists
     db.collection("users")
-        .document(uid)
-        .set(userMap)
-        .addOnSuccessListener {
-            Log.d("FIRESTORE", "✅ User profile saved for UID: $uid")
-
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            val profileUpdates = UserProfileChangeRequest.Builder()
-                .setDisplayName(name)
-                .build()
-
-            currentUser?.updateProfile(profileUpdates)
-                ?.addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        Log.d("AUTH_PROFILE", "✅ FirebaseAuth display name updated")
-                    } else {
-                        Log.e("AUTH_PROFILE", "❌ Failed to update display name: ${task.exception?.message}")
-                    }
-                    onSuccess()  // ✅ Call onSuccess regardless
-                } ?: run {
-                Log.e("AUTH_PROFILE", "❌ currentUser is null")
-                onSuccess()  // ✅ Call onSuccess even if user is null
+        .whereEqualTo("username", username)
+        .get()
+        .addOnSuccessListener { documents ->
+            if (!documents.isEmpty) {
+                onComplete(false, "❌ Username already taken")
+                return@addOnSuccessListener
             }
 
+            // Username is available, proceed with saving
+            val userMap = hashMapOf(
+                "name" to name,
+                "username" to username,
+                "balance" to 1000L  // 🪙 Initial balance
+            )
+
+            db.collection("users")
+                .document(uid)
+                .set(userMap)
+                .addOnSuccessListener {
+                    Log.d("FIRESTORE", "✅ User profile saved for UID: $uid")
+
+                    val currentUser = FirebaseAuth.getInstance().currentUser
+                    val profileUpdates = UserProfileChangeRequest.Builder()
+                        .setDisplayName(name)
+                        .build()
+
+                    currentUser?.updateProfile(profileUpdates)
+                        ?.addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                Log.d("AUTH_PROFILE", "✅ FirebaseAuth display name updated")
+                            } else {
+                                Log.e("AUTH_PROFILE", "❌ Failed to update display name: ${task.exception?.message}")
+                            }
+                            onComplete(true, "")
+                        } ?: run {
+                        Log.e("AUTH_PROFILE", "❌ currentUser is null")
+                        onComplete(true, "")
+                    }
+                }
+                .addOnFailureListener { exception ->
+                    Log.e("FIRESTORE", "❌ Failed to save user: ${exception.message}")
+                    onComplete(false, "❌ Failed to save profile: ${exception.message}")
+                }
         }
-        .addOnFailureListener {
-            Log.e("FIRESTORE", "❌ Failed to save user: ${it.message}")
-            it.printStackTrace()
+        .addOnFailureListener { exception ->
+            Log.e("FIRESTORE", "❌ Failed to check username: ${exception.message}")
+            onComplete(false, "❌ Failed to verify username: ${exception.message}")
         }
 }
-
-
-
-
-
