@@ -1,5 +1,8 @@
 package com.example.snapbank
 
+import android.widget.EditText
+import android.text.InputFilter
+import android.text.InputType
 import android.app.Activity
 import com.google.firebase.firestore.SetOptions
 import android.content.Context
@@ -35,6 +38,10 @@ import com.google.firebase.auth.*
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.util.concurrent.TimeUnit
+import java.security.MessageDigest
+import android.app.AlertDialog
+
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,36 +85,139 @@ fun AppFlow(activity: Activity) {
         ) {
             CircularProgressIndicator()
         }
-        return  // 🔒 Prevent UI from proceeding until screen is decided
+        return
     }
+
+    // ✅ Flags to trigger side-effects
+    var shouldCheckPin by remember { mutableStateOf(false) }
+    var showPinDialog by remember { mutableStateOf(false) }
 
     // ✅ Main navigation
     when (currentScreen) {
+
         "login" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
-
-            // 🔍 Check if the user already has a profile in Firestore
             FirebaseFirestore.getInstance()
-                .collection("users").document(userId)
+                .collection("users")
+                .document(userId)
                 .get()
                 .addOnSuccessListener { doc ->
-                    currentScreen = if (doc.exists()) {
-                        "dashboard"  // Existing user
+                    if (!doc.exists()) {
+                        currentScreen = "details"
+                    } else if (!doc.contains("pin")) {
+                        PromptToSetPin(userId, activity) {
+                            currentScreen = "dashboard"
+                        }
                     } else {
-                        "details"    // New user
+                        currentScreen = "dashboard"
                     }
                 }
                 .addOnFailureListener {
-                    currentScreen = "details"  // fallback to details screen
+                    currentScreen = "details"
                 }
         }
 
+
         "details" -> UserDetailsScreen(uid) {
-            currentScreen = "dashboard"
+            // After user enters details, trigger Firestore PIN check
+            shouldCheckPin = true
         }
 
         "dashboard" -> MainNavigationScreen(uid)
     }
+
+    // 🔍 PIN check logic after "details"
+    LaunchedEffect(shouldCheckPin) {
+        if (shouldCheckPin) {
+            shouldCheckPin = false
+            FirebaseFirestore.getInstance()
+                .collection("users").document(uid)
+                .get()
+                .addOnSuccessListener { doc ->
+                    if (!doc.contains("pin")) {
+                        showPinDialog = true
+                    } else {
+                        currentScreen = "dashboard"
+                    }
+                }
+        }
+    }
+
+    // ✅ Show PIN dialog *safely* in Compose
+    if (showPinDialog) {
+        SideEffect {
+            PromptToSetPin(uid, activity) {
+                currentScreen = "dashboard"
+            }
+            showPinDialog = false
+        }
+    }
+}
+fun PromptToSetPin(userId: String, context: Context, onSuccess: () -> Unit) {
+    val input = EditText(context)
+    input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    input.filters = arrayOf(InputFilter.LengthFilter(4))
+
+    AlertDialog.Builder(context)
+        .setTitle("Set a 4-digit PIN")
+        .setView(input)
+        .setCancelable(false)
+        .setPositiveButton("Save") { dialog, _ ->
+            val pin = input.text.toString()
+            if (pin.length == 4) {
+                val hashed = hashPin(pin)
+                FirebaseFirestore.getInstance().collection("users")
+                    .document(userId)
+                    .update("pin", hashed)
+                    .addOnSuccessListener {
+                        Toast.makeText(context, "PIN set successfully!", Toast.LENGTH_SHORT).show()
+                        onSuccess()
+                    }
+            } else {
+                Toast.makeText(context, "PIN must be 4 digits", Toast.LENGTH_SHORT).show()
+            }
+            dialog.dismiss()
+        }
+        .show()
+}
+
+fun hashPin(pin: String): String {
+    return MessageDigest.getInstance("SHA-256")
+        .digest(pin.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+}
+
+
+fun verifyPin(context: Context, userId: String, onSuccess: () -> Unit) {
+    val input = EditText(context)
+    input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    input.filters = arrayOf(InputFilter.LengthFilter(4))
+
+    AlertDialog.Builder(context)
+        .setTitle("Enter your 4-digit PIN")
+        .setView(input)
+        .setCancelable(true)
+        .setPositiveButton("Verify") { dialog, _ ->
+            val enteredPin = input.text.toString()
+            val hashedEnteredPin = hashPin(enteredPin)
+
+            FirebaseFirestore.getInstance().collection("users")
+                .document(userId)
+                .get()
+                .addOnSuccessListener { doc ->
+                    val correctPin = doc.getString("pin")
+                    if (hashedEnteredPin == correctPin) {
+                        onSuccess()
+                    } else {
+                        Toast.makeText(context, "❌ Incorrect PIN", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            dialog.dismiss()
+        }
+        .setNegativeButton("Cancel") { dialog, _ ->
+            dialog.dismiss()
+        }
+        .show()
 }
 
 @Composable
@@ -236,7 +346,6 @@ fun TransactionsScreen(uid: String) {
         }
     }
 }
-
 @Composable
 fun SendMoneyScreen(senderUid: String) {
     var recipient by remember { mutableStateOf("") }
@@ -259,7 +368,7 @@ fun SendMoneyScreen(senderUid: String) {
             value = recipient,
             onValueChange = {
                 recipient = it
-                status = "" // Clear status on input change
+                status = ""
             },
             label = { Text("Recipient Username") },
             modifier = Modifier.fillMaxWidth(),
@@ -271,7 +380,7 @@ fun SendMoneyScreen(senderUid: String) {
             value = amountText,
             onValueChange = {
                 amountText = it
-                status = "" // Clear status on input change
+                status = ""
             },
             label = { Text("Amount") },
             modifier = Modifier.fillMaxWidth(),
@@ -282,38 +391,31 @@ fun SendMoneyScreen(senderUid: String) {
 
         Button(
             onClick = {
-                // Enhanced input validation
                 val amount = amountText.toLongOrNull()
                 when {
                     recipient.isBlank() -> {
                         status = "⚠ Please enter recipient username"
-                        return@Button
                     }
                     recipient.length < 3 -> {
                         status = "⚠ Username must be at least 3 characters"
-                        return@Button
                     }
                     amount == null || amount <= 0 -> {
                         status = "⚠ Please enter a valid amount"
-                        return@Button
                     }
                     amount > 100000 -> {
                         status = "⚠ Maximum transfer limit is ₹1,00,000"
-                        return@Button
-                    }
-                    amount < 1 -> {
-                        status = "⚠ Minimum transfer amount is ₹1"
-                        return@Button
                     }
                     else -> {
-                        // Proceed with transfer
-                        sending = true
-                        performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
-                            status = message
-                            sending = false
-                            if (success) {
-                                amountText = ""
-                                recipient = ""
+                        // ✅ Secure PIN prompt before actual transfer
+                        verifyPin(context, senderUid) {
+                            sending = true
+                            performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
+                                sending = false
+                                status = message
+                                if (success) {
+                                    recipient = ""
+                                    amountText = ""
+                                }
                             }
                         }
                     }
@@ -335,6 +437,7 @@ fun SendMoneyScreen(senderUid: String) {
         }
     }
 }
+
 
 private fun performMoneyTransfer(
     senderUid: String,
@@ -392,14 +495,8 @@ private fun performMoneyTransfer(
                     "timestamp" to timestamp
                 )
 
-                transaction.set(
-                    senderRef.collection("transactions").document(),
-                    senderTxn
-                )
-                transaction.set(
-                    recipientRef.collection("transactions").document(),
-                    recipientTxn
-                )
+                transaction.set(senderRef.collection("transactions").document(), senderTxn)
+                transaction.set(recipientRef.collection("transactions").document(), recipientTxn)
             }.addOnSuccessListener {
                 val successMessage = "✅ ₹$amount sent to $recipient"
                 onComplete(true, successMessage)
@@ -426,6 +523,7 @@ private fun performMoneyTransfer(
             Log.e("SEND_MONEY", "User lookup failed", exception)
         }
 }
+
 
 @Composable
 fun SettingsScreen() {
@@ -496,7 +594,6 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
         Log.e("ADD_MONEY", "Failed to add money", exception)
     }
 }
-
 @Composable
 fun DashboardScreen(uid: String) {
     val user = FirebaseAuth.getInstance().currentUser
@@ -506,12 +603,13 @@ fun DashboardScreen(uid: String) {
     val balanceState = remember { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
 
-    // Add Money Dialog State
     var showAddMoneyDialog by remember { mutableStateOf(false) }
     var addAmount by remember { mutableStateOf("") }
     var addingMoney by remember { mutableStateOf(false) }
+    var showBalance by remember { mutableStateOf(false) }
+    var showChangePinDialog by remember { mutableStateOf(false) }
 
-    // 👂 Real-time listener for balance changes
+    // 👂 Real-time listener for balance
     LaunchedEffect(uid) {
         val docRef = db.collection("users").document(uid)
         docRef.addSnapshotListener { snapshot, e ->
@@ -532,9 +630,7 @@ fun DashboardScreen(uid: String) {
         }
     }
 
-    val gradient = Brush.verticalGradient(
-        colors = listOf(Color(0xFF00C9FF), Color(0xFF92FE9D))
-    )
+    val gradient = Brush.verticalGradient(colors = listOf(Color(0xFF00C9FF), Color(0xFF92FE9D)))
 
     Box(
         modifier = Modifier
@@ -558,26 +654,49 @@ fun DashboardScreen(uid: String) {
                 -1L -> Text("❌ Error loading balance", color = Color.Red)
                 else -> {
                     Text("💰 Current Balance", fontSize = 16.sp, color = Color(0xFF006064))
-                    Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+
+                    if (showBalance) {
+                        Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+                    } else {
+                        Button(
+                            onClick = {
+                                verifyPin(context, uid) {
+                                    showBalance = true
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF004D40))
+                        ) {
+                            Text("🔒 Tap to View Balance", color = Color.White)
+                        }
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Add Money Button
+            // ➕ Add Money Button
             Button(
                 onClick = { showAddMoneyDialog = true },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF00695C)
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
             ) {
                 Text("➕ Add Money", fontSize = 16.sp)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 🔁 Change PIN Button
+            Button(
+                onClick = { showChangePinDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F))
+            ) {
+                Text("🔁 Change PIN", fontSize = 16.sp, color = Color.White)
             }
         }
     }
 
-    // Add Money Dialog
+    // 💵 Add Money Dialog
     if (showAddMoneyDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -643,7 +762,71 @@ fun DashboardScreen(uid: String) {
             }
         )
     }
+
+    // 🔁 Change PIN trigger
+    if (showChangePinDialog) {
+        changePin(context, uid)
+        showChangePinDialog = false
+    }
 }
+fun changePin(context: Context, userId: String) {
+    val currentInput = EditText(context)
+    currentInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    currentInput.filters = arrayOf(InputFilter.LengthFilter(4))
+
+    AlertDialog.Builder(context)
+        .setTitle("🔐 Enter Current PIN")
+        .setView(currentInput)
+        .setCancelable(false)
+        .setPositiveButton("Next") { dialog, _ ->
+            val entered = currentInput.text.toString()
+            val hashed = hashPin(entered)
+
+            FirebaseFirestore.getInstance().collection("users")
+                .document(userId)
+                .get()
+                .addOnSuccessListener { doc ->
+                    val correctHash = doc.getString("pin")
+                    if (hashed == correctHash) {
+                        dialog.dismiss()
+
+                        // Prompt for new PIN
+                        val newInput = EditText(context)
+                        newInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                        newInput.filters = arrayOf(InputFilter.LengthFilter(4))
+
+                        AlertDialog.Builder(context)
+                            .setTitle("🆕 Enter New PIN")
+                            .setView(newInput)
+                            .setCancelable(false)
+                            .setPositiveButton("Save") { d2, _ ->
+                                val newPin = newInput.text.toString()
+                                if (newPin.length == 4) {
+                                    val newHash = hashPin(newPin)
+                                    FirebaseFirestore.getInstance().collection("users")
+                                        .document(userId)
+                                        .update("pin", newHash)
+                                        .addOnSuccessListener {
+                                            Toast.makeText(context, "✅ PIN changed", Toast.LENGTH_SHORT).show()
+                                        }
+                                } else {
+                                    Toast.makeText(context, "❌ PIN must be 4 digits", Toast.LENGTH_SHORT).show()
+                                }
+                                d2.dismiss()
+                            }
+                            .setNegativeButton("Cancel") { d2, _ -> d2.dismiss() }
+                            .show()
+
+                    } else {
+                        Toast.makeText(context, "❌ Incorrect current PIN", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            dialog.dismiss()
+        }
+        .setNegativeButton("Cancel") { dialog, _ -> dialog.dismiss() }
+        .show()
+}
+
 
 @Composable
 fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
