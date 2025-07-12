@@ -85,7 +85,21 @@ fun AppFlow(activity: Activity) {
     when (currentScreen) {
         "login" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
-            currentScreen = "details"
+
+            // 🔍 Check if the user already has a profile in Firestore
+            FirebaseFirestore.getInstance()
+                .collection("users").document(userId)
+                .get()
+                .addOnSuccessListener { doc ->
+                    currentScreen = if (doc.exists()) {
+                        "dashboard"  // Existing user
+                    } else {
+                        "details"    // New user
+                    }
+                }
+                .addOnFailureListener {
+                    currentScreen = "details"  // fallback to details screen
+                }
         }
 
         "details" -> UserDetailsScreen(uid) {
@@ -272,23 +286,23 @@ fun SendMoneyScreen(senderUid: String) {
                 val amount = amountText.toLongOrNull()
                 when {
                     recipient.isBlank() -> {
-                        status = "⚠️ Please enter recipient username"
+                        status = "⚠ Please enter recipient username"
                         return@Button
                     }
                     recipient.length < 3 -> {
-                        status = "⚠️ Username must be at least 3 characters"
+                        status = "⚠ Username must be at least 3 characters"
                         return@Button
                     }
                     amount == null || amount <= 0 -> {
-                        status = "⚠️ Please enter a valid amount"
+                        status = "⚠ Please enter a valid amount"
                         return@Button
                     }
                     amount > 100000 -> {
-                        status = "⚠️ Maximum transfer limit is ₹1,00,000"
+                        status = "⚠ Maximum transfer limit is ₹1,00,000"
                         return@Button
                     }
                     amount < 1 -> {
-                        status = "⚠️ Minimum transfer amount is ₹1"
+                        status = "⚠ Minimum transfer amount is ₹1"
                         return@Button
                     }
                     else -> {
@@ -424,7 +438,7 @@ fun SettingsScreen() {
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("⚙️ Settings", fontSize = 24.sp)
+        Text("⚙ Settings", fontSize = 24.sp)
         Spacer(modifier = Modifier.height(24.dp))
 
         // User info card
@@ -513,7 +527,7 @@ fun DashboardScreen(uid: String) {
                 Log.d("DASHBOARD", "✅ Balance updated: ₹$updatedBalance")
             } else {
                 balanceState.value = -1L
-                Log.w("DASHBOARD", "⚠️ Snapshot is null or does not exist")
+                Log.w("DASHBOARD", "⚠ Snapshot is null or does not exist")
             }
         }
     }
@@ -593,10 +607,10 @@ fun DashboardScreen(uid: String) {
                         val amount = addAmount.toLongOrNull()
                         when {
                             amount == null || amount <= 0 -> {
-                                Toast.makeText(context, "⚠️ Enter a valid amount", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "⚠ Enter a valid amount", Toast.LENGTH_SHORT).show()
                             }
                             amount > 50000 -> {
-                                Toast.makeText(context, "⚠️ Maximum add limit is ₹50,000", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "⚠ Maximum add limit is ₹50,000", Toast.LENGTH_SHORT).show()
                             }
                             else -> {
                                 addingMoney = true
@@ -683,15 +697,15 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
                     onClick = {
                         when {
                             phone.isBlank() -> {
-                                message = "⚠️ Enter a valid phone number"
+                                message = "⚠ Enter a valid phone number"
                                 return@Button
                             }
                             !phone.startsWith("+91") -> {
-                                message = "⚠️ Phone number must start with +91"
+                                message = "⚠ Phone number must start with +91"
                                 return@Button
                             }
                             phone.length != 13 -> {
-                                message = "⚠️ Phone number must be 10 digits after +91"
+                                message = "⚠ Phone number must be 10 digits after +91"
                                 return@Button
                             }
                             else -> {
@@ -734,7 +748,7 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
                     onClick = {
                         when {
                             otpCode.length != 6 -> {
-                                message = "⚠️ OTP must be 6 digits"
+                                message = "⚠ OTP must be 6 digits"
                                 return@Button
                             }
                             else -> {
@@ -833,23 +847,23 @@ fun UserDetailsScreen(uid: String, onSubmit: () -> Unit) {
                 onClick = {
                     when {
                         name.isBlank() -> {
-                            message = "⚠️ Name is required"
+                            message = "⚠ Name is required"
                             return@Button
                         }
                         name.length < 2 -> {
-                            message = "⚠️ Name must be at least 2 characters"
+                            message = "⚠ Name must be at least 2 characters"
                             return@Button
                         }
                         username.isBlank() -> {
-                            message = "⚠️ Username is required"
+                            message = "⚠ Username is required"
                             return@Button
                         }
                         username.length < 3 -> {
-                            message = "⚠️ Username must be at least 3 characters"
+                            message = "⚠ Username must be at least 3 characters"
                             return@Button
                         }
                         !username.matches(Regex("^[a-zA-Z0-9_]+$")) -> {
-                            message = "⚠️ Username can only contain letters, numbers, and underscores"
+                            message = "⚠ Username can only contain letters, numbers, and underscores"
                             return@Button
                         }
                         else -> {
@@ -958,10 +972,12 @@ fun saveUserDataToFirestore(
         .whereEqualTo("username", username)
         .get()
         .addOnSuccessListener { documents ->
-            if (!documents.isEmpty) {
+            val takenBySomeoneElse = documents.any { it.id != uid }
+            if (takenBySomeoneElse) {
                 onComplete(false, "❌ Username already taken")
                 return@addOnSuccessListener
             }
+
 
             // Username is available, proceed with saving
             val userMap = hashMapOf(
@@ -972,7 +988,7 @@ fun saveUserDataToFirestore(
 
             db.collection("users")
                 .document(uid)
-                .set(userMap)
+                .set(userMap, SetOptions.merge())
                 .addOnSuccessListener {
                     Log.d("FIRESTORE", "✅ User profile saved for UID: $uid")
 
