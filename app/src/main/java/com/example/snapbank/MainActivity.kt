@@ -73,7 +73,7 @@ fun AppFlow(activity: Activity) {
             uid = currentUser.uid
             "dashboard"
         } else {
-            "login"
+            "welcome"
         }
     }
 
@@ -94,6 +94,14 @@ fun AppFlow(activity: Activity) {
 
     // ✅ Main navigation
     when (currentScreen) {
+        "welcome" -> WelcomeScreen { selected ->
+            currentScreen = when(selected) {
+                "login" -> "login"
+                "signup" -> "signup"
+                else -> "login"
+            }
+
+        }
 
         "login" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
@@ -117,10 +125,14 @@ fun AppFlow(activity: Activity) {
                 }
         }
 
+        "signup" -> PhoneLoginScreen(activity) { userId ->
+            uid = userId
+            currentScreen = "details"
+        }
 
         "details" -> UserDetailsScreen(uid) {
-            // After user enters details, trigger Firestore PIN check
             shouldCheckPin = true
+            currentScreen = "dashboard"
         }
 
         "dashboard" -> MainNavigationScreen(uid)
@@ -831,6 +843,46 @@ fun changePin(context: Context, userId: String) {
         .show()
 }
 
+@Composable
+fun WelcomeScreen(onSelection: (String) -> Unit) {
+    val gradient = Brush.verticalGradient(listOf(Color(0xFFFFA726), Color(0xFFF57C00)))
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(gradient),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .padding(24.dp)
+                .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(20.dp))
+                .padding(24.dp)
+        ) {
+            Text("👋 Welcome to SnapBank", fontSize = 28.sp, color = Color(0xFFF57C00))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = { onSelection("login") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("🔐 Login")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = { onSelection("signup") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("🆕 Sign Up")
+            }
+        }
+    }
+}
 
 @Composable
 fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
@@ -853,7 +905,7 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("📱 Welcome to SnapBank", fontSize = 24.sp, color = Color(0xFF4A00E0))
+            Text(" Login ", fontSize = 24.sp, color = Color(0xFF4A00E0))
 
             Spacer(modifier = Modifier.height(16.dp))
 
