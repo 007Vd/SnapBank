@@ -370,10 +370,12 @@ fun SendMoneyScreen(senderUid: String) {
                 recipient = it
                 status = ""
             },
-            label = { Text("Recipient Username") },
+            label = { Text("Recipient Phone (+91...)") },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
         )
+
         Spacer(Modifier.height(8.dp))
 
         OutlinedTextField(
@@ -396,9 +398,10 @@ fun SendMoneyScreen(senderUid: String) {
                     recipient.isBlank() -> {
                         status = "⚠ Please enter recipient username"
                     }
-                    recipient.length < 3 -> {
-                        status = "⚠ Username must be at least 3 characters"
+                    !recipient.startsWith("+91") || recipient.length != 13 -> {
+                        status = "⚠ Enter valid 10-digit phone with +91 prefix"
                     }
+
                     amount == null || amount <= 0 -> {
                         status = "⚠ Please enter a valid amount"
                     }
@@ -448,7 +451,7 @@ private fun performMoneyTransfer(
     onComplete: (Boolean, String) -> Unit
 ) {
     db.collection("users")
-        .whereEqualTo("username", recipient)
+        .whereEqualTo("phone", recipient)
         .get()
         .addOnSuccessListener { docs ->
             if (docs.isEmpty) {
@@ -485,7 +488,8 @@ private fun performMoneyTransfer(
                 // Create transaction records
                 val timestamp = System.currentTimeMillis()
                 val senderTxn = hashMapOf(
-                    "type" to "Sent to $recipient",
+                    "type" to "Sent to ${recipientDoc.getString("name") ?: "Unknown"}"
+                    ,
                     "amount" to amount,
                     "timestamp" to timestamp
                 )
@@ -1161,13 +1165,15 @@ fun saveUserDataToFirestore(
                 return@addOnSuccessListener
             }
 
-
+            val phone = FirebaseAuth.getInstance().currentUser?.phoneNumber
             // Username is available, proceed with saving
             val userMap = hashMapOf(
                 "name" to name,
                 "username" to username,
-                "balance" to 1000L  // 🪙 Initial balance
+                "balance" to 1000L,
+                "phone" to phone
             )
+
 
             db.collection("users")
                 .document(uid)
