@@ -39,9 +39,33 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import android.text.InputType
 import android.text.InputFilter
+import androidx.compose.foundation.Image
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.FirebaseException
 import androidx.compose.ui.text.font.FontWeight
+import android.graphics.Bitmap
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -383,97 +407,184 @@ fun TransactionsScreen(uid: String) {
         }
     }
 }
+
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
+@Composable
+fun QRScannerScreen(
+    onScanned: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    val previewView = remember { PreviewView(context) }
+    val scanner = BarcodeScanning.getClient()
+
+    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+
+    LaunchedEffect(Unit) {
+        val cameraProvider = cameraProviderFuture.get()
+        val preview = Preview.Builder().build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+
+        analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
+            val mediaImage = imageProxy.image
+            if (mediaImage != null) {
+                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                scanner.process(image)
+                    .addOnSuccessListener { barcodes ->
+                        for (barcode in barcodes) {
+                            barcode.rawValue?.let { scanned ->
+                                imageProxy.close()
+                                scanner.close()
+                                cameraProvider.unbindAll()
+                                onScanned(scanned)
+                                return@addOnSuccessListener
+                            }
+                        }
+                        imageProxy.close()
+                    }
+                    .addOnFailureListener {
+                        imageProxy.close()
+                    }
+            }
+        }
+
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            CameraSelector.DEFAULT_BACK_CAMERA,
+            preview,
+            analysis
+        )
+    }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
+        IconButton(onClick = onCancel) {
+            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+        }
+    }
+}
+
+
 @Composable
 fun SendMoneyScreen(senderUid: String) {
     var recipient by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
 
     val db = FirebaseFirestore.getInstance()
     val context = LocalContext.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text("📤 Send Money", fontSize = 20.sp)
-        Spacer(Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = recipient,
-            onValueChange = {
-                recipient = it
-                status = ""
+    if (showScanner) {
+        QRScannerScreen(
+            onScanned = { scannedPhone ->
+                recipient = scannedPhone
+                showScanner = false
             },
-            label = { Text("Recipient Phone (+91...)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            onCancel = {
+                showScanner = false
+            }
         )
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Text("📤 Send Money", fontSize = 20.sp)
+            Spacer(Modifier.height(16.dp))
 
-        Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = recipient,
+                onValueChange = {
+                    recipient = it
+                    status = ""
+                },
+                label = { Text("Recipient Phone (+91...)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
 
-        OutlinedTextField(
-            value = amountText,
-            onValueChange = {
-                amountText = it
-                status = ""
-            },
-            label = { Text("Amount") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true
-        )
-        Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
 
-        Button(
-            onClick = {
-                val amount = amountText.toLongOrNull()
-                when {
-                    recipient.isBlank() -> {
-                        status = "⚠ Please enter recipient username"
-                    }
-                    !recipient.startsWith("+91") || recipient.length != 13 -> {
-                        status = "⚠ Enter valid 10-digit phone with +91 prefix"
-                    }
+            OutlinedTextField(
+                value = amountText,
+                onValueChange = {
+                    amountText = it
+                    status = ""
+                },
+                label = { Text("Amount") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
 
-                    amount == null || amount <= 0 -> {
-                        status = "⚠ Please enter a valid amount"
-                    }
-                    amount > 100000 -> {
-                        status = "⚠ Maximum transfer limit is ₹1,00,000"
-                    }
-                    else -> {
-                        // ✅ Secure PIN prompt before actual transfer
-                        verifyPin(context, senderUid) {
-                            sending = true
-                            performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
-                                sending = false
-                                status = message
-                                if (success) {
-                                    recipient = ""
-                                    amountText = ""
+            Spacer(Modifier.height(16.dp))
+
+            // 📷 QR Code Scan Button
+            Button(
+                onClick = { showScanner = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("📷 Scan QR to Send")
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Button(
+                onClick = {
+                    val amount = amountText.toLongOrNull()
+                    when {
+                        recipient.isBlank() -> {
+                            status = "⚠ Please enter recipient phone"
+                        }
+                        !recipient.startsWith("+91") || recipient.length != 13 -> {
+                            status = "⚠ Enter valid 10-digit phone with +91 prefix"
+                        }
+                        amount == null || amount <= 0 -> {
+                            status = "⚠ Please enter a valid amount"
+                        }
+                        amount > 100000 -> {
+                            status = "⚠ Maximum transfer limit is ₹1,00,000"
+                        }
+                        else -> {
+                            verifyPin(context, senderUid) {
+                                sending = true
+                                performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
+                                    sending = false
+                                    status = message
+                                    if (success) {
+                                        recipient = ""
+                                        amountText = ""
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            },
-            enabled = !sending,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (sending) "Sending..." else "Send Money")
-        }
+                },
+                enabled = !sending,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (sending) "Sending..." else "Send Money")
+            }
 
-        if (status.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = status,
-                color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
-            )
+            if (status.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = status,
+                    color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
@@ -635,10 +746,12 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
         Log.e("ADD_MONEY", "Failed to add money", exception)
     }
 }
+
 @Composable
 fun DashboardScreen(uid: String) {
     val user = FirebaseAuth.getInstance().currentUser
     val name = user?.displayName ?: "User"
+    var showQR by remember { mutableStateOf(false) }
 
     val db = FirebaseFirestore.getInstance()
     val balanceState = remember { mutableStateOf<Long?>(null) }
@@ -734,6 +847,18 @@ fun DashboardScreen(uid: String) {
             ) {
                 Text("🔁 Change PIN", fontSize = 16.sp, color = Color.White)
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 📷 QR Code Button
+            Button(
+                onClick = { showQR = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF283593))
+            ) {
+                Text("📷 My QR Code", fontSize = 16.sp, color = Color.White)
+            }
+
         }
     }
 
@@ -809,7 +934,72 @@ fun DashboardScreen(uid: String) {
         changePin(context, uid)
         showChangePinDialog = false
     }
+    if (showQR) {
+        QRCodeScreen(uid) {
+            showQR = false
+        }
+    }
+
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QRCodeScreen(uid: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val qrCodeBitmap = remember(uid) { generateQRCode(uid, context) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("My QR Code") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Scan this to send money", style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(24.dp))
+            qrCodeBitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = "QR Code",
+                    modifier = Modifier.size(250.dp)
+                )
+            }
+        }
+    }
+}
+
+fun generateQRCode(text: String, context: Context): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 512, 512)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bmp
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
 fun changePin(context: Context, userId: String) {
     val currentInput = EditText(context)
     currentInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
