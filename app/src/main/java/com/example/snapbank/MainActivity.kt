@@ -1,13 +1,11 @@
 package com.example.snapbank
 
-import android.widget.EditText
-import android.text.InputFilter
-import android.text.InputType
 import android.app.Activity
-import com.google.firebase.firestore.SetOptions
+import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +20,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,15 +32,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.snapbank.ui.theme.SnapBankTheme
-import com.google.firebase.FirebaseException
 import com.google.firebase.auth.*
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreException
-import java.util.concurrent.TimeUnit
+import com.google.firebase.firestore.SetOptions
 import java.security.MessageDigest
-import android.app.AlertDialog
-
-
+import java.util.concurrent.TimeUnit
+import android.text.InputType
+import android.text.InputFilter
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.FirebaseException
+import androidx.compose.ui.text.font.FontWeight
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,28 +102,36 @@ fun AppFlow(activity: Activity) {
             }
 
         }
-
         "login" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
-            FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(userId)
-                .get()
+            val userRef = FirebaseFirestore.getInstance().collection("users").document(userId)
+
+            userRef.get()
                 .addOnSuccessListener { doc ->
                     if (!doc.exists()) {
                         currentScreen = "details"
-                    } else if (!doc.contains("pin")) {
-                        PromptToSetPin(userId, activity) {
+                    } else {
+                        // ✅ Step 1: Keeper migration for existing users
+                        if (!doc.contains("keeper_balance")) {
+                            userRef.update("keeper_balance", 0.0)
+                        }
+
+                        if (!doc.contains("pin")) {
+                            PromptToSetPin(userId, activity) {
+                                currentScreen = "dashboard"
+                            }
+                        } else {
                             currentScreen = "dashboard"
                         }
-                    } else {
-                        currentScreen = "dashboard"
                     }
                 }
                 .addOnFailureListener {
                     currentScreen = "details"
                 }
         }
+
+
+
 
         "signup" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
@@ -201,9 +209,11 @@ fun hashPin(pin: String): String {
 
 
 fun verifyPin(context: Context, userId: String, onSuccess: () -> Unit) {
-    val input = EditText(context)
-    input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-    input.filters = arrayOf(InputFilter.LengthFilter(4))
+    val input = EditText(context).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        filters = arrayOf(InputFilter.LengthFilter(4))
+        hint = "Enter 4-digit PIN"
+    }
 
     AlertDialog.Builder(context)
         .setTitle("Enter your 4-digit PIN")
@@ -231,11 +241,13 @@ fun verifyPin(context: Context, userId: String, onSuccess: () -> Unit) {
         }
         .show()
 }
-
 @Composable
 fun MainNavigationScreen(uid: String) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabItems = listOf("Dashboard", "Transactions", "Send", "Settings")
+    val context = LocalContext.current
+
+    // ✅ Added Keeper tab
+    val tabItems = listOf("Dashboard", "Transactions", "Send", "Keeper", "Settings")
 
     Scaffold(
         bottomBar = {
@@ -243,12 +255,22 @@ fun MainNavigationScreen(uid: String) {
                 tabItems.forEachIndexed { index, label ->
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        onClick = {
+                            if (label == "Keeper") {
+                                // ✅ Step 3: Ask PIN before switching to Keeper tab
+                                verifyPin(context, uid) {
+                                    selectedTab = index
+                                }
+                            } else {
+                                selectedTab = index
+                            }
+                        },
                         icon = {
                             when (label) {
                                 "Dashboard" -> Icon(Icons.Filled.Home, contentDescription = label)
                                 "Transactions" -> Icon(Icons.Filled.List, contentDescription = label)
                                 "Send" -> Icon(Icons.Filled.Send, contentDescription = label)
+                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label) // 🔐 Keeper Icon
                                 "Settings" -> Icon(Icons.Filled.Settings, contentDescription = label)
                                 else -> Icon(Icons.Filled.Info, contentDescription = label)
                             }
@@ -264,11 +286,14 @@ fun MainNavigationScreen(uid: String) {
                 0 -> DashboardScreen(uid)
                 1 -> TransactionsScreen(uid)
                 2 -> SendMoneyScreen(uid)
-                3 -> SettingsScreen()
+                3 -> KeeperScreen(uid) // ✅ New Keeper Screen
+                4 -> SettingsScreen()
             }
         }
     }
 }
+
+
 
 @Composable
 fun TransactionsScreen(uid: String) {
@@ -1197,6 +1222,132 @@ fun signInWithPhoneAuthCredential(
             }
         }
 }
+fun transferToKeeper(userId: String, amount: Double, context: Context) {
+    val db = FirebaseFirestore.getInstance()
+    val userRef = db.collection("users").document(userId)
+
+    db.runTransaction { transaction ->
+        val snapshot = transaction.get(userRef)
+        val mainBalance = snapshot.getDouble("balance") ?: 0.0
+        val keeperBalance = snapshot.getDouble("keeper_balance") ?: 0.0
+
+        if (mainBalance >= amount) {
+            transaction.update(userRef, mapOf(
+                "balance" to (mainBalance - amount),
+                "keeper_balance" to (keeperBalance + amount)
+            ))
+        } else {
+            throw Exception("Insufficient balance")
+        }
+    }.addOnSuccessListener {
+        Toast.makeText(context, "Saved ₹$amount to Keeper", Toast.LENGTH_SHORT).show()
+    }.addOnFailureListener {
+        Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun withdrawFromKeeper(userId: String, amount: Double, context: Context) {
+    val db = FirebaseFirestore.getInstance()
+    val userRef = db.collection("users").document(userId)
+
+    db.runTransaction { transaction ->
+        val snapshot = transaction.get(userRef)
+        val mainBalance = snapshot.getDouble("balance") ?: 0.0
+        val keeperBalance = snapshot.getDouble("keeper_balance") ?: 0.0
+
+        if (keeperBalance >= amount) {
+            transaction.update(userRef, mapOf(
+                "balance" to (mainBalance + amount),
+                "keeper_balance" to (keeperBalance - amount)
+            ))
+        } else {
+            throw Exception("Insufficient Keeper balance")
+        }
+    }.addOnSuccessListener {
+        Toast.makeText(context, "Withdrew ₹$amount from Keeper", Toast.LENGTH_SHORT).show()
+    }.addOnFailureListener {
+        Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show()
+    }
+}
+@Composable
+fun KeeperScreen(uid: String) {
+    val context = LocalContext.current
+    var keeperBalance by remember { mutableStateOf(0.0) }
+    var amountInput by remember { mutableStateOf("") }
+
+    // Load Keeper Balance
+    LaunchedEffect(Unit) {
+        FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    keeperBalance = snapshot.getDouble("keeper_balance") ?: 0.0
+                }
+            }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Keeper Balance", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("₹$keeperBalance", fontSize = 26.sp, color = Color(0xFF4CAF50))
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = amountInput,
+            onValueChange = { amountInput = it },
+            label = { Text("Enter Amount") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Save to Keeper
+        Button(
+            onClick = {
+                val amount = amountInput.toDoubleOrNull() ?: 0.0
+                if (amount > 0) {
+                    verifyPin(context, uid) {
+                        transferToKeeper(uid, amount, context)
+                    }
+                } else {
+                    Toast.makeText(context, "Enter valid amount", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Save to Keeper")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Withdraw from Keeper
+        Button(
+            onClick = {
+                val amount = amountInput.toDoubleOrNull() ?: 0.0
+                if (amount > 0) {
+                    verifyPin(context, uid) {
+                        withdrawFromKeeper(uid, amount, context)
+                    }
+                } else {
+                    Toast.makeText(context, "Enter valid amount", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+        ) {
+            Text("Withdraw from Keeper")
+        }
+    }
+}
+
+
 
 fun saveUserDataToFirestore(
     uid: String,
@@ -1218,14 +1369,15 @@ fun saveUserDataToFirestore(
             }
 
             val phone = FirebaseAuth.getInstance().currentUser?.phoneNumber
-            // Username is available, proceed with saving
+
+            // ✅ User data map with Keeper support
             val userMap = hashMapOf(
                 "name" to name,
                 "username" to username,
                 "balance" to 1000L,
+                "keeper_balance" to 0.0,   // ✅ Added Keeper balance field
                 "phone" to phone
             )
-
 
             db.collection("users")
                 .document(uid)
