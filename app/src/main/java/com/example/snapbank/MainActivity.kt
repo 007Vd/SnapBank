@@ -1,72 +1,96 @@
+//@file:OptIn(androidx.camera.core.ExperimentalGetImage::class)
+
 package com.example.snapbank
 
+
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.ConnectionResult
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.ExperimentalGetImage
+
+import androidx.camera.core.ImageProxy
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Bundle
+import android.text.InputFilter
+import android.text.InputType
 import android.util.Log
 import android.widget.EditText
 import android.widget.Toast
+
+// ✅ Jetpack Compose UI
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.snapbank.ui.theme.SnapBankTheme
-import com.google.firebase.auth.*
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
-import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
-import android.text.InputType
-import android.text.InputFilter
-import androidx.compose.foundation.Image
-import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.FirebaseException
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import android.graphics.Bitmap
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.unit.dp
+
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
+// ✅ CameraX
+
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.runtime.*
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.*
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+
+// ✅ ML Kit (QR Scanner)
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+
+// ✅ ZXing (QR Code generation)
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+
+// ✅ Firebase
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.*
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.SetOptions
+
+// ✅ Others (App Theme)
+import com.example.snapbank.ui.theme.SnapBankTheme
+
+// ✅ Utils
+import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
+
 
 
 class MainActivity : ComponentActivity() {
@@ -121,13 +145,14 @@ fun AppFlow(activity: Activity) {
     // ✅ Main navigation
     when (currentScreen) {
         "welcome" -> WelcomeScreen { selected ->
-            currentScreen = when(selected) {
+            currentScreen = when (selected) {
                 "login" -> "login"
                 "signup" -> "signup"
                 else -> "login"
             }
 
         }
+
         "login" -> PhoneLoginScreen(activity) { userId ->
             uid = userId
             val userRef = FirebaseFirestore.getInstance().collection("users").document(userId)
@@ -155,8 +180,6 @@ fun AppFlow(activity: Activity) {
                     currentScreen = "details"
                 }
         }
-
-
 
 
         "signup" -> PhoneLoginScreen(activity) { userId ->
@@ -199,6 +222,7 @@ fun AppFlow(activity: Activity) {
         }
     }
 }
+
 fun PromptToSetPin(userId: String, context: Context, onSuccess: () -> Unit) {
     val input = EditText(context)
     input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
@@ -270,9 +294,27 @@ fun verifyPin(context: Context, userId: String, onSuccess: () -> Unit) {
 @Composable
 fun MainNavigationScreen(uid: String) {
     var selectedTab by remember { mutableStateOf(0) }
+    var currentUserPhone by remember { mutableStateOf("") }
+
     val context = LocalContext.current
 
-    // ✅ Added Keeper tab
+    // ✅ Fetch logged-in user's phone number from Firestore
+    LaunchedEffect(uid) {
+        FirebaseFirestore.getInstance().collection("users")
+            .document(uid)
+            .get()
+            .addOnSuccessListener { document ->
+                currentUserPhone = document.getString("phone") ?: ""
+                Log.d("QR_DEBUG", "Fetched phone for QR: $currentUserPhone")
+
+            }
+            .addOnFailureListener {
+                Toast.makeText(context, "❌ Failed to fetch phone number", Toast.LENGTH_SHORT).show()
+                Log.e("QR_DEBUG", "Failed to fetch phone: ${it.message}")
+
+            }
+    }
+
     val tabItems = listOf("Dashboard", "Transactions", "Send", "Keeper", "Settings")
 
     Scaffold(
@@ -283,7 +325,7 @@ fun MainNavigationScreen(uid: String) {
                         selected = selectedTab == index,
                         onClick = {
                             if (label == "Keeper") {
-                                // ✅ Step 3: Ask PIN before switching to Keeper tab
+                                // ✅ Ask PIN before switching to Keeper tab
                                 verifyPin(context, uid) {
                                     selectedTab = index
                                 }
@@ -296,31 +338,34 @@ fun MainNavigationScreen(uid: String) {
                                 "Dashboard" -> Icon(Icons.Filled.Home, contentDescription = label)
                                 "Transactions" -> Icon(Icons.Filled.List, contentDescription = label)
                                 "Send" -> Icon(Icons.Filled.Send, contentDescription = label)
-                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label) // 🔐 Keeper Icon
+                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label)
                                 "Settings" -> Icon(Icons.Filled.Settings, contentDescription = label)
                                 else -> Icon(Icons.Filled.Info, contentDescription = label)
                             }
                         },
-                        label = { Text(
-                            text = label,
-                            fontSize = 10.sp) }
+                        label = {
+                            Text(text = label, fontSize = 10.sp)
+                        }
                     )
                 }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding)) {
+            val currentUser = FirebaseAuth.getInstance().currentUser
+            val userPhone = currentUser?.phoneNumber ?: ""
+
             when (selectedTab) {
-                0 -> DashboardScreen(uid)
+                0 -> DashboardScreen(uid = uid, userPhone = userPhone)
                 1 -> TransactionsScreen(uid)
-                2 -> SendMoneyScreen(uid)
-                3 -> KeeperScreen(uid) // ✅ New Keeper Screen
+                2 -> SendMoneyScreen(uid, senderPhone = userPhone)
+                3 -> KeeperScreen(uid)
                 4 -> SettingsScreen()
             }
+
         }
     }
 }
-
 
 
 @Composable
@@ -372,18 +417,21 @@ fun TransactionsScreen(uid: String) {
                     CircularProgressIndicator()
                 }
             }
+
             errorMessage.isNotEmpty() -> {
                 Text(
                     text = "❌ $errorMessage",
                     color = MaterialTheme.colorScheme.error
                 )
             }
+
             transactions.isEmpty() -> {
                 Text(
                     text = "💳 No transactions yet",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
             else -> {
                 transactions.forEach { transaction ->
                     Card(
@@ -392,8 +440,10 @@ fun TransactionsScreen(uid: String) {
                             .padding(vertical = 4.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Row(modifier = Modifier,
-                            verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Image(
                                 painter = painterResource(R.drawable.pngtree_instagram_bule_tick_insta_blue_star_vector_png_image_6695210),
                                 contentDescription = null,
@@ -420,8 +470,30 @@ fun TransactionsScreen(uid: String) {
         }
     }
 }
+//@Composable
+//fun RequestCameraPermission(onGranted: () -> Unit) {
+//    val context = LocalContext.current
+//    val permissionLauncher = rememberLauncherForActivityResult(
+//        contract = ActivityResultContracts.RequestPermission()
+//    ) { isGranted ->
+//        if (isGranted) {
+//            onGranted()
+//        } else {
+//            Toast.makeText(context, "Camera permission is required", Toast.LENGTH_SHORT).show()
+//        }
+//    }
+//
+//    LaunchedEffect(Unit) {
+//        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+//            == PackageManager.PERMISSION_GRANTED
+//        ) {
+//            onGranted()
+//        } else {
+//            permissionLauncher.launch(Manifest.permission.CAMERA)
+//        }
+//    }
+//}
 
-@androidx.annotation.OptIn(ExperimentalGetImage::class)
 @Composable
 fun QRScannerScreen(
     onScanned: (String) -> Unit,
@@ -431,72 +503,148 @@ fun QRScannerScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val previewView = remember { PreviewView(context) }
-    val scanner = BarcodeScanning.getClient()
+    val scanner = remember { BarcodeScanning.getClient() }
 
     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
     LaunchedEffect(Unit) {
-        val cameraProvider = cameraProviderFuture.get()
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
 
-        val analysis = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-
-        analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
-            val mediaImage = imageProxy.image
-            if (mediaImage != null) {
-                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                scanner.process(image)
-                    .addOnSuccessListener { barcodes ->
-                        for (barcode in barcodes) {
-                            barcode.rawValue?.let { scanned ->
-                                imageProxy.close()
-                                scanner.close()
-                                cameraProvider.unbindAll()
-                                onScanned(scanned)
-                                return@addOnSuccessListener
-                            }
-                        }
-                        imageProxy.close()
-                    }
-                    .addOnFailureListener {
-                        imageProxy.close()
-                    }
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
             }
-        }
 
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            CameraSelector.DEFAULT_BACK_CAMERA,
-            preview,
-            analysis
-        )
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+
+            analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy: ImageProxy ->
+                try {
+                    val nv21 = imageProxyToNV21(imageProxy)
+                    val image = InputImage.fromByteArray(
+                        nv21,
+                        imageProxy.width,
+                        imageProxy.height,
+                        imageProxy.imageInfo.rotationDegrees,
+                        InputImage.IMAGE_FORMAT_NV21
+                    )
+
+                    scanner.process(image)
+                        .addOnSuccessListener { barcodes ->
+                            for (barcode in barcodes) {
+                                barcode.rawValue?.let { scanned ->
+                                    val cleanNumber = scanned
+                                        .removePrefix("PHONE:")
+                                        .trim() // ✅ Extract phone correctly
+                                    imageProxy.close()
+                                    cameraProvider.unbindAll()
+                                    onScanned(cleanNumber)
+                                    return@addOnSuccessListener
+                                }
+                            }
+                            imageProxy.close()
+                        }
+                        .addOnFailureListener {
+                            imageProxy.close()
+                        }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    imageProxy.close()
+                }
+            }
+
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                analysis
+            )
+        }, ContextCompat.getMainExecutor(context))
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
-        IconButton(onClick = onCancel) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+        IconButton(
+            onClick = onCancel,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
         }
     }
 }
 
+private fun imageProxyToNV21(imageProxy: ImageProxy): ByteArray {
+    val yBuffer = imageProxy.planes[0].buffer
+    val uBuffer = imageProxy.planes[1].buffer
+    val vBuffer = imageProxy.planes[2].buffer
+
+    val ySize = yBuffer.remaining()
+    val uSize = uBuffer.remaining()
+    val vSize = vBuffer.remaining()
+
+    val nv21 = ByteArray(ySize + uSize + vSize)
+
+    yBuffer.get(nv21, 0, ySize)
+    vBuffer.get(nv21, ySize, vSize)
+    uBuffer.get(nv21, ySize + vSize, uSize)
+
+    return nv21
+}
+
 
 @Composable
-fun SendMoneyScreen(senderUid: String) {
+fun MainApp() {
+    val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
+
+    val currentUser = auth.currentUser
+    val uid = currentUser?.uid ?: ""
+    var senderPhone by remember { mutableStateOf<String?>(null) }
+
+    // 🔄 Fetch user's phone number from Firestore once
+    LaunchedEffect(uid) {
+        if (uid.isNotEmpty()) {
+            db.collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    senderPhone = doc.getString("phone")
+                }
+                .addOnFailureListener {
+                    senderPhone = ""
+                }
+        }
+    }
+
+    // ✅ UI Handling
+    if (uid.isEmpty()) {
+        Text("❌ User not logged in", color = Color.Red)
+    } else if (senderPhone == null) {
+        // Still loading
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    } else {
+        // ✅ Ready to send money
+        SendMoneyScreen(senderUid = uid, senderPhone = senderPhone ?: "")
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SendMoneyScreen(senderUid: String, senderPhone: String) {
     var recipient by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
 
-    val db = FirebaseFirestore.getInstance()
     val context = LocalContext.current
+    val db = FirebaseFirestore.getInstance()
 
     if (showScanner) {
+        // ✅ Scanner screen
         QRScannerScreen(
             onScanned = { scannedPhone ->
                 recipient = scannedPhone
@@ -544,7 +692,6 @@ fun SendMoneyScreen(senderUid: String) {
 
             Spacer(Modifier.height(16.dp))
 
-            // 📷 QR Code Scan Button
             Button(
                 onClick = { showScanner = true },
                 modifier = Modifier.fillMaxWidth()
@@ -573,7 +720,14 @@ fun SendMoneyScreen(senderUid: String) {
                         else -> {
                             verifyPin(context, senderUid) {
                                 sending = true
-                                performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
+                                performMoneyTransfer(
+                                    senderUid,
+                                    senderPhone,
+                                    recipient,
+                                    amount,
+                                    db,
+                                    context
+                                ) { success, message ->
                                     sending = false
                                     status = message
                                     if (success) {
@@ -592,20 +746,22 @@ fun SendMoneyScreen(senderUid: String) {
             }
 
             if (status.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     text = status,
-                    color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error
+                    color = if (status.startsWith("✅"))
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.error
                 )
             }
         }
     }
 }
 
-
 private fun performMoneyTransfer(
     senderUid: String,
+    senderPhone: String,
     recipient: String,
     amount: Long,
     db: FirebaseFirestore,
@@ -643,20 +799,19 @@ private fun performMoneyTransfer(
                     throw Exception("Insufficient balance")
                 }
 
-                // Update balances
+                // ✅ Update balances
                 transaction.update(senderRef, "balance", senderBalance - amount)
                 transaction.update(recipientRef, "balance", recipientBalance + amount)
 
-                // Create transaction records
+                // ✅ Transaction records
                 val timestamp = System.currentTimeMillis()
                 val senderTxn = hashMapOf(
-                    "type" to "Sent to ${recipientDoc.getString("name") ?: "Unknown"}"
-                    ,
+                    "type" to "Sent to ${recipientDoc.getString("name") ?: recipient}",
                     "amount" to amount,
                     "timestamp" to timestamp
                 )
                 val recipientTxn = hashMapOf(
-                    "type" to "Received from ${senderSnapshot.getString("username") ?: "Unknown"}",
+                    "type" to "Received from $senderPhone",
                     "amount" to amount,
                     "timestamp" to timestamp
                 )
@@ -676,6 +831,7 @@ private fun performMoneyTransfer(
                             else -> "❌ ${exception.message}"
                         }
                     }
+
                     else -> "❌ ${exception.message}"
                 }
                 onComplete(false, errorMessage)
@@ -689,6 +845,7 @@ private fun performMoneyTransfer(
             Log.e("SEND_MONEY", "User lookup failed", exception)
         }
 }
+
 
 
 @Composable
@@ -760,9 +917,8 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
         Log.e("ADD_MONEY", "Failed to add money", exception)
     }
 }
-
 @Composable
-fun DashboardScreen(uid: String) {
+fun DashboardScreen(uid: String,userPhone: String) {
     val user = FirebaseAuth.getInstance().currentUser
     val name = user?.displayName ?: "User"
     var showQR by remember { mutableStateOf(false) }
@@ -777,9 +933,13 @@ fun DashboardScreen(uid: String) {
     var showBalance by remember { mutableStateOf(false) }
     var showChangePinDialog by remember { mutableStateOf(false) }
 
-    // 👂 Real-time listener for balance
+    // ✅ New: Store user phone
+    var userPhone by remember { mutableStateOf("") }
+
+    // ✅ Fetch user phone and listen to balance
     LaunchedEffect(uid) {
         val docRef = db.collection("users").document(uid)
+
         docRef.addSnapshotListener { snapshot, e ->
             if (e != null) {
                 Log.e("DASHBOARD", "❌ Listen failed: ${e.message}")
@@ -790,7 +950,10 @@ fun DashboardScreen(uid: String) {
             if (snapshot != null && snapshot.exists()) {
                 val updatedBalance = snapshot.getLong("balance") ?: 0L
                 balanceState.value = updatedBalance
-                Log.d("DASHBOARD", "✅ Balance updated: ₹$updatedBalance")
+
+                userPhone = snapshot.getString("phone") ?: ""  // ✅ Get phone here
+
+                Log.d("DASHBOARD", "✅ Balance: ₹$updatedBalance | Phone: $userPhone")
             } else {
                 balanceState.value = -1L
                 Log.w("DASHBOARD", "⚠ Snapshot is null or does not exist")
@@ -807,72 +970,84 @@ fun DashboardScreen(uid: String) {
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
-                .padding(24.dp)
-                .fillMaxWidth()
-        ) {
-            Text("Hello, $name 👋", fontSize = 24.sp, color = Color(0xFF006064))
-            Spacer(modifier = Modifier.height(16.dp))
+        if (showQR) {
+            // ✅ Show QR Code Screen with PHONE, not UID
+            QRCodeScreen(userPhone = userPhone) {
+                showQR = false
+            }
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+                    .fillMaxWidth()
+            ) {
+                Text("Hello, $name 👋", fontSize = 24.sp, color = Color(0xFF006064))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            when (val balance = balanceState.value) {
-                null -> CircularProgressIndicator()
-                -1L -> Text("❌ Error loading balance", color = Color.Red)
-                else -> {
-                    Text("💰 Current Balance", fontSize = 16.sp, color = Color(0xFF006064))
+                when (val balance = balanceState.value) {
+                    null -> CircularProgressIndicator()
+                    -1L -> Text("❌ Error loading balance", color = Color.Red)
+                    else -> {
+                        Text("💰 Current Balance", fontSize = 16.sp, color = Color(0xFF006064))
 
-                    if (showBalance) {
-                        Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
-                    } else {
-                        Button(
-                            onClick = {
-                                verifyPin(context, uid) {
-                                    showBalance = true
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF004D40))
-                        ) {
-                            Text("🔒 Tap to View Balance", color = Color.White)
+                        if (showBalance) {
+                            Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+                        } else {
+                            Button(
+                                onClick = {
+                                    verifyPin(context, uid) {
+                                        showBalance = true
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF004D40))
+                            ) {
+                                Text("🔒 Tap to View Balance", color = Color.White)
+                            }
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // ➕ Add Money Button
+                Button(
+                    onClick = { showAddMoneyDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
+                ) {
+                    Text("➕ Add Money", fontSize = 16.sp)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 🔁 Change PIN Button
+                Button(
+                    onClick = { showChangePinDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F))
+                ) {
+                    Text("🔁 Change PIN", fontSize = 16.sp, color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // ✅ 📷 QR Code Button
+                Button(
+                    onClick = {
+                        if (userPhone.isNotBlank()) {
+                            showQR = true
+                        } else {
+                            Toast.makeText(context, "⚠ Phone number not found", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF283593))
+                ) {
+                    Text("📷 My QR Code", fontSize = 16.sp, color = Color.White)
+                }
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // ➕ Add Money Button
-            Button(
-                onClick = { showAddMoneyDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
-            ) {
-                Text("➕ Add Money", fontSize = 16.sp)
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 🔁 Change PIN Button
-            Button(
-                onClick = { showChangePinDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F))
-            ) {
-                Text("🔁 Change PIN", fontSize = 16.sp, color = Color.White)
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 📷 QR Code Button
-            Button(
-                onClick = { showQR = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF283593))
-            ) {
-                Text("📷 My QR Code", fontSize = 16.sp, color = Color.White)
-            }
-
         }
     }
 
@@ -948,19 +1123,17 @@ fun DashboardScreen(uid: String) {
         changePin(context, uid)
         showChangePinDialog = false
     }
-    if (showQR) {
-        QRCodeScreen(uid) {
-            showQR = false
-        }
-    }
-
 }
+
+
+// --- QRCodeScreen.kt ---
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QRCodeScreen(uid: String, onBack: () -> Unit) {
+fun QRCodeScreen(userPhone: String, onBack: () -> Unit) {
     val context = LocalContext.current
-    val qrCodeBitmap = remember(uid) { generateQRCode(uid, context) }
+    val qrCodeBitmap = remember(userPhone) { generateQRCode(userPhone, context) }
 
     Scaffold(
         topBar = {
@@ -996,15 +1169,21 @@ fun QRCodeScreen(uid: String, onBack: () -> Unit) {
 }
 
 fun generateQRCode(text: String, context: Context): Bitmap? {
+    Log.d("QR_DEBUG", "QR Encoded Text: $text")
     return try {
+        val formattedText = "PHONE:$text" // ✅ Example: PHONE:+911234567890
         val writer = QRCodeWriter()
-        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 512, 512)
+        val bitMatrix = writer.encode(formattedText, BarcodeFormat.QR_CODE, 512, 512)
         val width = bitMatrix.width
         val height = bitMatrix.height
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
         for (x in 0 until width) {
             for (y in 0 until height) {
-                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                bmp.setPixel(
+                    x,
+                    y,
+                    if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                )
             }
         }
         bmp
@@ -1013,6 +1192,7 @@ fun generateQRCode(text: String, context: Context): Bitmap? {
         null
     }
 }
+
 
 fun changePin(context: Context, userId: String) {
     val currentInput = EditText(context)
@@ -1037,7 +1217,8 @@ fun changePin(context: Context, userId: String) {
 
                         // Prompt for new PIN
                         val newInput = EditText(context)
-                        newInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                        newInput.inputType =
+                            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
                         newInput.filters = arrayOf(InputFilter.LengthFilter(4))
 
                         AlertDialog.Builder(context)
@@ -1052,10 +1233,18 @@ fun changePin(context: Context, userId: String) {
                                         .document(userId)
                                         .update("pin", newHash)
                                         .addOnSuccessListener {
-                                            Toast.makeText(context, "✅ PIN changed", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(
+                                                context,
+                                                "✅ PIN changed",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
                                         }
                                 } else {
-                                    Toast.makeText(context, "❌ PIN must be 4 digits", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        context,
+                                        "❌ PIN must be 4 digits",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                                 d2.dismiss()
                             }
@@ -1063,7 +1252,8 @@ fun changePin(context: Context, userId: String) {
                             .show()
 
                     } else {
-                        Toast.makeText(context, "❌ Incorrect current PIN", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "❌ Incorrect current PIN", Toast.LENGTH_SHORT)
+                            .show()
                     }
                 }
             dialog.dismiss()
@@ -1124,7 +1314,9 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
     val gradient = Brush.verticalGradient(listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0)))
 
     Box(
-        modifier = Modifier.fillMaxSize().background(gradient),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(gradient),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -1168,18 +1360,22 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
                                 message = "⚠ Enter a valid phone number"
                                 return@Button
                             }
+
                             !phone.startsWith("+91") -> {
                                 message = "⚠ Phone number must start with +91"
                                 return@Button
                             }
+
                             phone.length != 13 -> {
                                 message = "⚠ Phone number must be 10 digits after +91"
                                 return@Button
                             }
+
                             else -> {
                                 loading = true
                                 message = ""
-                                sendVerificationCode(phone, activity,
+                                sendVerificationCode(
+                                    phone, activity,
                                     onSent = {
                                         loading = false
                                         otpSent = true
@@ -1219,10 +1415,12 @@ fun PhoneLoginScreen(activity: Activity, onLoginSuccess: (String) -> Unit) {
                                 message = "⚠ OTP must be 6 digits"
                                 return@Button
                             }
+
                             else -> {
                                 loading = true
                                 message = ""
-                                verifyCode(otpCode,
+                                verifyCode(
+                                    otpCode,
                                     onSuccess = { uid ->
                                         loading = false
                                         message = "✅ Login successful"
@@ -1318,22 +1516,28 @@ fun UserDetailsScreen(uid: String, onSubmit: () -> Unit) {
                             message = "⚠ Name is required"
                             return@Button
                         }
+
                         name.length < 2 -> {
                             message = "⚠ Name must be at least 2 characters"
                             return@Button
                         }
+
                         username.isBlank() -> {
                             message = "⚠ Username is required"
                             return@Button
                         }
+
                         username.length < 3 -> {
                             message = "⚠ Username must be at least 3 characters"
                             return@Button
                         }
+
                         !username.matches(Regex("^[a-zA-Z0-9_]+$")) -> {
-                            message = "⚠ Username can only contain letters, numbers, and underscores"
+                            message =
+                                "⚠ Username can only contain letters, numbers, and underscores"
                             return@Button
                         }
+
                         else -> {
                             loading = true
                             message = ""
@@ -1341,7 +1545,11 @@ fun UserDetailsScreen(uid: String, onSubmit: () -> Unit) {
                                 loading = false
                                 if (success) {
                                     Log.d("DEBUG", "Moving to next screen")
-                                    Toast.makeText(context, "✅ Profile created successfully", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        context,
+                                        "✅ Profile created successfully",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                     onSubmit()
                                 } else {
                                     message = errorMsg
@@ -1389,7 +1597,10 @@ fun sendVerificationCode(
                 onError("Verification failed: ${e.message}")
             }
 
-            override fun onCodeSent(verificationId: String, token: PhoneAuthProvider.ForceResendingToken) {
+            override fun onCodeSent(
+                verificationId: String,
+                token: PhoneAuthProvider.ForceResendingToken
+            ) {
                 Log.d("PHONE_AUTH", "📩 OTP sent to $phoneNumber.")
                 storedVerificationId = verificationId
                 onSent()
@@ -1426,6 +1637,7 @@ fun signInWithPhoneAuthCredential(
             }
         }
 }
+
 fun transferToKeeper(userId: String, amount: Double, context: Context) {
     val db = FirebaseFirestore.getInstance()
     val userRef = db.collection("users").document(userId)
@@ -1436,10 +1648,12 @@ fun transferToKeeper(userId: String, amount: Double, context: Context) {
         val keeperBalance = snapshot.getDouble("keeper_balance") ?: 0.0
 
         if (mainBalance >= amount) {
-            transaction.update(userRef, mapOf(
-                "balance" to (mainBalance - amount),
-                "keeper_balance" to (keeperBalance + amount)
-            ))
+            transaction.update(
+                userRef, mapOf(
+                    "balance" to (mainBalance - amount),
+                    "keeper_balance" to (keeperBalance + amount)
+                )
+            )
         } else {
             throw Exception("Insufficient balance")
         }
@@ -1460,10 +1674,12 @@ fun withdrawFromKeeper(userId: String, amount: Double, context: Context) {
         val keeperBalance = snapshot.getDouble("keeper_balance") ?: 0.0
 
         if (keeperBalance >= amount) {
-            transaction.update(userRef, mapOf(
-                "balance" to (mainBalance + amount),
-                "keeper_balance" to (keeperBalance - amount)
-            ))
+            transaction.update(
+                userRef, mapOf(
+                    "balance" to (mainBalance + amount),
+                    "keeper_balance" to (keeperBalance - amount)
+                )
+            )
         } else {
             throw Exception("Insufficient Keeper balance")
         }
@@ -1473,6 +1689,7 @@ fun withdrawFromKeeper(userId: String, amount: Double, context: Context) {
         Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show()
     }
 }
+
 @Composable
 fun KeeperScreen(uid: String) {
     val context = LocalContext.current
@@ -1552,7 +1769,6 @@ fun KeeperScreen(uid: String) {
 }
 
 
-
 fun saveUserDataToFirestore(
     uid: String,
     name: String,
@@ -1599,7 +1815,10 @@ fun saveUserDataToFirestore(
                             if (task.isSuccessful) {
                                 Log.d("AUTH_PROFILE", "✅ FirebaseAuth display name updated")
                             } else {
-                                Log.e("AUTH_PROFILE", "❌ Failed to update display name: ${task.exception?.message}")
+                                Log.e(
+                                    "AUTH_PROFILE",
+                                    "❌ Failed to update display name: ${task.exception?.message}"
+                                )
                             }
                             onComplete(true, "")
                         } ?: run {
