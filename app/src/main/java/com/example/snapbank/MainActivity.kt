@@ -57,6 +57,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -299,7 +301,9 @@ fun MainNavigationScreen(uid: String) {
                                 else -> Icon(Icons.Filled.Info, contentDescription = label)
                             }
                         },
-                        label = { Text(label) }
+                        label = { Text(
+                            text = label,
+                            fontSize = 10.sp) }
                     )
                 }
             }
@@ -388,18 +392,27 @@ fun TransactionsScreen(uid: String) {
                             .padding(vertical = 4.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
-                        ) {
-                            Text(
-                                text = transaction["type"] as String,
-                                fontSize = 16.sp
+                        Row(modifier = Modifier,
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(R.drawable.pngtree_instagram_bule_tick_insta_blue_star_vector_png_image_6695210),
+                                contentDescription = null,
+                                modifier = Modifier.size(50.dp),
+                                contentScale = ContentScale.Fit
                             )
-                            Text(
-                                text = "₹${transaction["amount"]}",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    text = transaction["type"] as String,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "₹${transaction["amount"]}",
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -497,7 +510,8 @@ fun SendMoneyScreen(senderUid: String) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center
         ) {
             Text("📤 Send Money", fontSize = 20.sp)
             Spacer(Modifier.height(16.dp))
@@ -791,7 +805,7 @@ fun DashboardScreen(uid: String) {
             .fillMaxSize()
             .background(gradient)
             .padding(24.dp),
-        contentAlignment = Alignment.TopCenter
+        contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
