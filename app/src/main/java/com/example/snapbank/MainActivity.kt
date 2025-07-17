@@ -536,12 +536,14 @@ fun QRScannerScreen(
                                 barcode.rawValue?.let { scanned ->
                                     val cleanNumber = scanned
                                         .removePrefix("PHONE:")
-                                        .trim() // ✅ Extract phone correctly
+                                        .trim()
+
                                     imageProxy.close()
                                     cameraProvider.unbindAll()
                                     onScanned(cleanNumber)
                                     return@addOnSuccessListener
                                 }
+
                             }
                             imageProxy.close()
                         }
