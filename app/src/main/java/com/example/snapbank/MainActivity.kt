@@ -989,13 +989,20 @@ fun DashboardScreen(uid: String) {
     }
 
 }
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QRCodeScreen(uid: String, onBack: () -> Unit) {
     val context = LocalContext.current
-    val qrCodeBitmap = remember(uid) { generateQRCode(uid, context) }
+
+    // ✅ Get phone number if available, otherwise fall back to UID
+    val currentUser = FirebaseAuth.getInstance().currentUser
+    val dataToEncode = currentUser?.phoneNumber ?: uid
+
+    // ✅ Log to verify what we are encoding
+    Log.d("QR_CODE", "Encoding: $dataToEncode")
+
+    // ✅ Generate QR code based on phone number (or UID fallback)
+    val qrCodeBitmap = remember(dataToEncode) { generateQRCode(dataToEncode, context) }
 
     Scaffold(
         topBar = {
@@ -1029,6 +1036,8 @@ fun QRCodeScreen(uid: String, onBack: () -> Unit) {
         }
     }
 }
+
+
 
 fun generateQRCode(text: String, context: Context): Bitmap? {
     return try {
