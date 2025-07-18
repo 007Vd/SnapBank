@@ -50,11 +50,17 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.layout.ContentScale
@@ -67,6 +73,8 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 class MainActivity : ComponentActivity() {
@@ -358,7 +366,10 @@ fun TransactionsScreen(uid: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .background(color = Color(0xFFD2A679))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+
     ) {
         Text("📜 Transaction History", fontSize = 20.sp)
         Spacer(modifier = Modifier.height(16.dp))
@@ -390,8 +401,10 @@ fun TransactionsScreen(uid: String) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
+                        colors = CardDefaults.elevatedCardColors(containerColor = Color.DarkGray, contentColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+
+                        ) {
                         Row(modifier = Modifier,
                             verticalAlignment = Alignment.CenterVertically) {
                             Image(
@@ -410,7 +423,7 @@ fun TransactionsScreen(uid: String) {
                                 Text(
                                     text = "₹${transaction["amount"]}",
                                     fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = Color.Yellow
                                 )
                             }
                         }
@@ -420,6 +433,7 @@ fun TransactionsScreen(uid: String) {
         }
     }
 }
+
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 @Composable
@@ -510,8 +524,11 @@ fun SendMoneyScreen(senderUid: String) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(color = Color(0xFFD2A679))
                 .padding(16.dp),
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+
         ) {
             Text("📤 Send Money", fontSize = 20.sp)
             Spacer(Modifier.height(16.dp))
@@ -602,6 +619,7 @@ fun SendMoneyScreen(senderUid: String) {
         }
     }
 }
+
 
 
 private fun performMoneyTransfer(
@@ -699,6 +717,7 @@ fun SettingsScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = Color(0xFFD2A679))
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -738,6 +757,7 @@ fun SettingsScreen() {
     }
 }
 
+
 fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
     val db = FirebaseFirestore.getInstance()
     val userRef = db.collection("users").document(uid)
@@ -763,6 +783,7 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
 
 @Composable
 fun DashboardScreen(uid: String) {
+    val coroutineScope = rememberCoroutineScope()
     val user = FirebaseAuth.getInstance().currentUser
     val name = user?.displayName ?: "User"
     var showQR by remember { mutableStateOf(false) }
@@ -798,15 +819,16 @@ fun DashboardScreen(uid: String) {
         }
     }
 
-    val gradient = Brush.verticalGradient(colors = listOf(Color(0xFF00C9FF), Color(0xFF92FE9D)))
+    val gradient = Brush.verticalGradient(colors = listOf(Color(0XFF87CEEB),Color.Blue, Color.Black, Color.Blue,Color(0XFF87CEEB)))
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(gradient)
             .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
+        contentAlignment = Alignment.Center,
+
+        ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
@@ -824,17 +846,26 @@ fun DashboardScreen(uid: String) {
                     Text("💰 Current Balance", fontSize = 16.sp, color = Color(0xFF006064))
 
                     if (showBalance) {
-                        Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+                        AnimatedVisibility(
+                            visible = showBalance,
+                            enter = fadeIn(animationSpec = tween(700)) + scaleIn(initialScale = 0.8f),
+                            exit = fadeOut()
+                        ){
+                            Text("₹$balance", fontSize = 32.sp, color = Color(0xFF004D40))
+                        }
                     } else {
                         Button(
                             onClick = {
                                 verifyPin(context, uid) {
-                                    showBalance = true
+                                    coroutineScope.launch {
+                                        delay(400)
+                                        showBalance = true
+                                    }
+
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF004D40))
                         ) {
-                            Text("🔒 Tap to View Balance", color = Color.White)
+                            Text("🔒 Tap to View Balance", color = Color.Yellow)
                         }
                     }
                 }
@@ -846,7 +877,8 @@ fun DashboardScreen(uid: String) {
             Button(
                 onClick = { showAddMoneyDialog = true },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0x88000000)),
+                shape = CutCornerShape(50.dp)
             ) {
                 Text("➕ Add Money", fontSize = 16.sp)
             }
@@ -857,7 +889,8 @@ fun DashboardScreen(uid: String) {
             Button(
                 onClick = { showChangePinDialog = true },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)),
+                shape = CutCornerShape(50.dp)
             ) {
                 Text("🔁 Change PIN", fontSize = 16.sp, color = Color.White)
             }
@@ -868,7 +901,8 @@ fun DashboardScreen(uid: String) {
             Button(
                 onClick = { showQR = true },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF283593))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212121)),
+                shape = CutCornerShape(50.dp)
             ) {
                 Text("📷 My QR Code", fontSize = 16.sp, color = Color.White)
             }
@@ -955,6 +989,7 @@ fun DashboardScreen(uid: String) {
     }
 
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1494,11 +1529,12 @@ fun KeeperScreen(uid: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = Color(0xFFD2A679))
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Keeper Balance", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("₹$keeperBalance", fontSize = 26.sp, color = Color(0xFF4CAF50))
+        Text("₹$keeperBalance", fontSize = 26.sp, color = Color.Red)
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -1544,12 +1580,13 @@ fun KeeperScreen(uid: String) {
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3F51B5))
         ) {
             Text("Withdraw from Keeper")
         }
     }
 }
+
 
 
 
