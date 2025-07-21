@@ -1,7 +1,15 @@
 package com.example.snapbank
 
 
+//import androidx.compose.material.icons.Icons
+//import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CurrencyRupee
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.QrCodeScanner
 import android.app.Activity
+import com.example.snapbank.SettingsScreen
+
 import com.example.snapbank.TransactionPage
 import android.app.AlertDialog
 import android.content.Context
@@ -77,23 +85,36 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.example.snapbank.ui.theme.SnapBankTheme
+import androidx.core.view.WindowCompat
+//import android.os.Bundle
+//import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+//import androidx.compose.ui.Modifier
 
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val activity = this
-
         enableEdgeToEdge()
         setContent {
             SnapBankTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    AppFlow(activity)
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppFlow(this) // ✅ All UI changes will be inside AppFlow & child composables
                 }
             }
         }
     }
 }
+
 
 lateinit var storedVerificationId: String
 
@@ -285,10 +306,11 @@ fun MainNavigationScreen(uid: String) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 tabItems.forEachIndexed { index, label ->
+                    val selected = selectedTab == index
                     NavigationBarItem(
-                        selected = selectedTab == index,
+                        selected = selected,
                         onClick = {
                             if (label == "Keeper") {
                                 verifyPin(context, uid) {
@@ -299,32 +321,83 @@ fun MainNavigationScreen(uid: String) {
                             }
                         },
                         icon = {
-                            when (label) {
-                                "Dashboard" -> Icon(Icons.Filled.Home, contentDescription = label)
-                                "Transactions" -> Icon(Icons.Filled.List, contentDescription = label)
-                                "Send" -> Icon(Icons.Filled.Send, contentDescription = label)
-                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label)
-                                "Settings" -> Icon(Icons.Filled.Settings, contentDescription = label)
-                                else -> Icon(Icons.Filled.Info, contentDescription = label)
-                            }
+                            Icon(
+                                imageVector = when (label) {
+                                    "Dashboard" -> Icons.Filled.Home
+                                    "Transactions" -> Icons.Filled.List
+                                    "Send" -> Icons.Filled.Send
+                                    "Keeper" -> Icons.Filled.Lock
+                                    "Settings" -> Icons.Filled.Settings
+                                    else -> Icons.Filled.Info
+                                },
+                                contentDescription = label,
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface
+                            )
                         },
                         label = {
-                            Text(text = label, fontSize = 10.sp)
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     )
                 }
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             when (selectedTab) {
                 0 -> DashboardScreen(uid)
-                1 -> TransactionPage(uid)  // ✅ Updated to use new TransactionPage
+                1 -> TransactionPage(uid)
                 2 -> SendMoneyScreen(uid)
                 3 -> KeeperScreen(uid)
-                4 -> SettingsScreen()
+                4 -> SettingsScreen(
+                    uid = uid,
+                    onChangePin = {
+                        // ✅ Example action: Navigate to Change PIN Screen
+                        Toast.makeText(context, "Change PIN clicked!", Toast.LENGTH_SHORT).show()
+                    },
+                    onLogout = {
+                        FirebaseAuth.getInstance().signOut()
+                        Toast.makeText(context, "Logged out!", Toast.LENGTH_SHORT).show()
+                        // ✅ Optionally navigate back to Login Screen
+                    }
+                )
+                // ✅ Pass uid for settings screen
             }
         }
+    }
+}
+
+@Composable
+fun SnapBankButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge
+        )
     }
 }
 
@@ -394,89 +467,90 @@ fun QRScannerScreen(
 
 @Composable
 fun SendMoneyScreen(senderUid: String) {
+    val db = FirebaseFirestore.getInstance()
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var recipient by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
 
-    val db = FirebaseFirestore.getInstance()
-    val context = LocalContext.current
-
-    if (showScanner) {
-        QRScannerScreen(
-            onScanned = { scannedPhone ->
-                recipient = scannedPhone
-                showScanner = false
-            },
-            onCancel = {
-                showScanner = false
-            }
+    val gradient = Brush.verticalGradient(
+        colors = listOf(
+            Color(0XFF87CEEB),
+            Color.Blue,
+            Color.Black,
+            Color.Blue,
+            Color(0XFF87CEEB)
         )
-    } else {
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(gradient)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .fillMaxSize()
-                .background(color = Color(0xFFD2A679))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
+                .padding(24.dp)
+                .fillMaxWidth()
         ) {
-            Text("📤 Send Money", fontSize = 20.sp)
-            Spacer(Modifier.height(16.dp))
+            Text(
+                "Send Money 💸",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF006064)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = recipient,
-                onValueChange = {
-                    recipient = it
-                    status = ""
-                },
-                label = { Text("Recipient Phone (+91...)") },
-                modifier = Modifier.fillMaxWidth(),
+                onValueChange = { recipient = it },
+                label = { Text("Recipient Phone Number") },
+                leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             OutlinedTextField(
                 value = amountText,
-                onValueChange = {
-                    amountText = it
-                    status = ""
-                },
+                onValueChange = { amountText = it },
                 label = { Text("Amount") },
-                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = { Icon(Icons.Filled.CurrencyRupee, contentDescription = null) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(16.dp))
-
-            Button(
-                onClick = { showScanner = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("📷 Scan QR to Send")
-            }
-
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
                     val amount = amountText.toLongOrNull()
                     when {
-                        recipient.isBlank() -> status = "⚠ Please enter recipient phone"
-                        !recipient.startsWith("+91") || recipient.length != 13 -> status = "⚠ Enter valid 10-digit phone with +91 prefix"
-                        amount == null || amount <= 0 -> status = "⚠ Please enter a valid amount"
-                        amount > 100000 -> status = "⚠ Maximum transfer limit is ₹1,00,000"
+                        recipient.isBlank() -> Toast.makeText(context, "⚠ Enter recipient phone", Toast.LENGTH_SHORT).show()
+                        amount == null || amount <= 0 -> Toast.makeText(context, "⚠ Enter a valid amount", Toast.LENGTH_SHORT).show()
                         else -> {
                             verifyPin(context, senderUid) {
                                 sending = true
-                                performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
-
+                                performMoneyTransfer(
+                                    senderUid = senderUid,
+                                    recipient = recipient,
+                                    amount = amount,
+                                    db = db,
+                                    context = context
+                                ) { success, message ->
                                     sending = false
-                                    status = message
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                     if (success) {
                                         recipient = ""
                                         amountText = ""
@@ -486,22 +560,50 @@ fun SendMoneyScreen(senderUid: String) {
                         }
                     }
                 },
+                modifier = Modifier.fillMaxWidth(),
                 enabled = !sending,
-                modifier = Modifier.fillMaxWidth()
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)),
+                shape = CutCornerShape(50.dp)
             ) {
-                Text(if (sending) "Sending..." else "Send Money")
+                Text(
+                    if (sending) "Sending..." else "Send Money",
+                    color = Color.White,
+                    fontSize = 16.sp
+                )
             }
 
-            if (status.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = status,
-                    color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // QR Code Scan Button
+            Button(
+                onClick = { showScanner = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212121)),
+                shape = CutCornerShape(50.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.QrCodeScanner,
+                    contentDescription = "Scan QR",
+                    tint = Color.White
                 )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Scan QR Code", color = Color.White, fontSize = 16.sp)
             }
         }
     }
+
+    // ✅ Show QR Scanner when needed
+    if (showScanner) {
+        QRScannerScreen(
+            onScanned = { scannedPhone ->
+                showScanner = false
+                recipient = scannedPhone
+            },
+            onCancel = { showScanner = false }
+        )
+    }
 }
+
 
 private fun performMoneyTransfer(
     senderUid: String,
@@ -578,12 +680,6 @@ private fun performMoneyTransfer(
             Log.e("SEND_MONEY", "User lookup failed", exception)
         }
 }
-
-
-
-
-
-
 @Composable
 fun SettingsScreen() {
     val context = LocalContext.current
@@ -655,7 +751,6 @@ fun addMoney(uid: String, amount: Long, onComplete: (Boolean, String) -> Unit) {
         Log.e("ADD_MONEY", "Failed to add money", exception)
     }
 }
-
 @Composable
 fun DashboardScreen(uid: String) {
     val coroutineScope = rememberCoroutineScope()
@@ -864,6 +959,7 @@ fun DashboardScreen(uid: String) {
     }
 
 }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QRCodeScreen(uid: String, onBack: () -> Unit) {

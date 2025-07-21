@@ -2,6 +2,24 @@ package com.example.snapbank.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+//package com.example.snapbank.ui.theme
+//
+//import androidx.compose.ui.graphics.Color
+
+// 🔥 Primary vibrant colors
+val PurpleGradientStart = Color(0xFF7F00FF)
+val PurpleGradientEnd = Color(0xFFE100FF)
+
+val NeonGreen = Color(0xFF00FF9D)
+val DeepBlue = Color(0xFF0047AB)
+val SunsetOrange = Color(0xFFFF6F00)
+
+// Neutral / Background
+val LightBackground = Color(0xFFF7F7F7)
+val CardWhite = Color(0xFFFFFFFF)
+val ErrorRed = Color(0xFFFF3D00)
+
+
 val primaryLight = Color(0xFF475D92)
 val onPrimaryLight = Color(0xFFFFFFFF)
 val primaryContainerLight = Color(0xFFD9E2FF)

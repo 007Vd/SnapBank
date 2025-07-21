@@ -3,9 +3,6 @@ package com.example.snapbank
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -22,14 +19,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import com.google.firebase.firestore.Query
-
-
-
-
-
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,8 +35,10 @@ fun TransactionPage(uid: String) {
     var errorMessage by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") }
+
     val db = FirebaseFirestore.getInstance()
 
+    // ✅ Fetch Transactions (once)
     LaunchedEffect(Unit) {
         db.collection("users").document(uid)
             .collection("transactions")
@@ -72,12 +68,14 @@ fun TransactionPage(uid: String) {
             }
     }
 
+    // ✅ Filtering Logic
     LaunchedEffect(searchQuery, selectedFilter, allTransactions) {
         filteredTransactions = allTransactions.filter { transaction ->
             val type = (transaction["type"] as String).lowercase()
             val amount = (transaction["amount"] as Long).toString()
             val name = (transaction["name"] as String).lowercase()
             val phone = (transaction["phone"] as String).lowercase()
+            val timestamp = transaction["timestamp"] as Long
             val timeFilter = when (selectedFilter) {
                 "Last Hour" -> System.currentTimeMillis() - 3600_000
                 "Last Day" -> System.currentTimeMillis() - 86_400_000
@@ -85,12 +83,13 @@ fun TransactionPage(uid: String) {
                 "Last Month" -> System.currentTimeMillis() - 30L * 86_400_000
                 else -> 0L
             }
-            val timestamp = transaction["timestamp"] as Long
-            (searchQuery.isBlank() || type.contains(searchQuery) || amount.contains(searchQuery) || name.contains(searchQuery) || phone.contains(searchQuery)) &&
+            (searchQuery.isBlank() || type.contains(searchQuery) || amount.contains(searchQuery)
+                    || name.contains(searchQuery) || phone.contains(searchQuery)) &&
                     (timeFilter == 0L || timestamp >= timeFilter)
         }
     }
 
+    // ✅ UI
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -99,6 +98,8 @@ fun TransactionPage(uid: String) {
     ) {
         Text("📜 Transaction History", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(12.dp))
+
+        // 🔍 Search Box
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -108,6 +109,8 @@ fun TransactionPage(uid: String) {
             singleLine = true
         )
         Spacer(modifier = Modifier.height(10.dp))
+
+        // 🔄 Filters
         val filters = listOf("All", "Last Hour", "Last Day", "Last Week", "Last Month")
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -121,11 +124,19 @@ fun TransactionPage(uid: String) {
                 )
             }
         }
+
         Spacer(modifier = Modifier.height(12.dp))
+
+        // 📝 Transactions
         when {
-            isLoading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            isLoading -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+
             errorMessage.isNotEmpty() -> Text("❌ $errorMessage", color = Color.Red)
             filteredTransactions.isEmpty() -> Text("💳 No transactions found", color = Color.Gray)
+
             else -> LazyColumn {
                 items(filteredTransactions) { transaction ->
                     TransactionCard(transaction)
@@ -134,6 +145,7 @@ fun TransactionPage(uid: String) {
         }
     }
 }
+
 @Composable
 fun TransactionCard(transaction: Map<String, Any>) {
     val type = transaction["type"] as String
@@ -157,7 +169,9 @@ fun TransactionCard(transaction: Map<String, Any>) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Image(
-                painter = painterResource(if (isSent) R.drawable.ic_money_sent else R.drawable.ic_money_received),
+                painter = painterResource(
+                    if (isSent) R.drawable.ic_money_sent else R.drawable.ic_money_received
+                ),
                 contentDescription = null,
                 modifier = Modifier
                     .size(40.dp)
@@ -165,18 +179,15 @@ fun TransactionCard(transaction: Map<String, Any>) {
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column {
-                Text(
-                    text = if (isSent) type else type,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(type, fontWeight = FontWeight.Bold)
                 Text("₹$amount", color = if (isSent) Color.Red else Color.Green)
                 if (phone.isNotEmpty()) Text("📞 $phone", fontSize = 12.sp, color = Color.Gray)
+                if (name.isNotEmpty()) Text("👤 $name", fontSize = 12.sp, color = Color.DarkGray)
                 Text(timeAgo, fontSize = 12.sp, color = Color.DarkGray)
             }
         }
     }
 }
-
 
 fun getTimeAgo(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp

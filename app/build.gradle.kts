@@ -40,6 +40,10 @@ android {
     buildFeatures {
         compose = true
     }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.3"
+    }
 }
 
 dependencies {
@@ -51,15 +55,28 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-//    implementation("com.google.zxing:core:3.5.1")
-//    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.compose.material3:material3:1.2.1")
+//    implementation("androidx.compose.material3:material3-pullrefresh:1.2.1") // ✅ REQUIRED
+    implementation("androidx.compose.material:material-icons-extended")
+// ✅ Shimmer Effect
+    // ✅ Coil for Jetpack Compose
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    implementation("androidx.compose.material3:material3:1.2.1") // or latest stable
+//    implementation("androidx.compose.material3:material3-pullrefresh:1.2.1") // ✅ REQUIRED
+//    implementation("com.google.accompanist:accompanist-swiperefresh:0.31.5-beta")
+
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
+//    implementation("com.google.accompanist:accompanist-swiperefresh:0.31.5-beta")
+// ✅ Pull to Refresh
+//    implementation("com./google.accompanist:accompanist-swiperefresh:0.31.6-beta")
+
+//    implementation("androidx.compose.material:material-icons-extended:<compose_version>")
+
+    // ✅ Animations
+    implementation("com.airbnb.android:lottie-compose:6.0.0")
+
+    // ✅ Barcode Scanner & Camera
     implementation("com.google.zxing:core:3.5.2")
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
     implementation("androidx.camera:camera-core:1.3.0")
@@ -67,10 +84,20 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.0")
     implementation("androidx.camera:camera-view:1.3.0")
     implementation("androidx.camera:camera-mlkit-vision:1.4.2")
+
     // ✅ Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.15.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.1.0")
+
+    // ✅ Testing
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }
