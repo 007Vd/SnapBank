@@ -12,7 +12,9 @@ import com.example.snapbank.SettingsScreen
 
 import com.example.snapbank.TransactionPage
 import android.app.AlertDialog
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.EditText
@@ -54,6 +56,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.FirebaseException
 import androidx.compose.ui.text.font.FontWeight
 import android.graphics.Bitmap
+import android.provider.MediaStore
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -95,6 +98,10 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
+
 //import androidx.compose.ui.Modifier
 
 
@@ -464,6 +471,84 @@ fun QRScannerScreen(
     }
 }
 
+fun shareQRCode(context: Context, bitmap: Bitmap) {
+    try {
+        val fileName = "qr_code_share_${System.currentTimeMillis()}.png"
+        val cachePath = File(context.cacheDir, "images")
+        cachePath.mkdirs()
+        val file = File(cachePath, fileName)
+
+        FileOutputStream(file).use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        }
+
+        val contentUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+
+        val shareIntent = Intent().apply {
+            action = Intent.ACTION_SEND
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            type = "image/png"
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        }
+
+        context.startActivity(Intent.createChooser(shareIntent, "Share QR Code via"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to share QR: ${e.message}", Toast.LENGTH_SHORT).show()
+        e.printStackTrace()
+    }
+}
+
+
+fun saveQRCodeToGallery(context: Context, bitmap: Bitmap, fileName: String) {
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MyAppQR")
+        put(MediaStore.Images.Media.IS_PENDING, 1)
+    }
+
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+    uri?.let {
+        resolver.openOutputStream(it)?.use { outStream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outStream)
+        }
+
+        contentValues.clear()
+        contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+        resolver.update(it, contentValues, null, null)
+
+        Toast.makeText(context, "QR code saved to gallery!", Toast.LENGTH_SHORT).show()
+    } ?: run {
+        Toast.makeText(context, "Failed to save QR code.", Toast.LENGTH_SHORT).show()
+    }
+
+}
+
+
+fun generateQRCode(text: String, context: Context): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 512, 512)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bmp
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
 
 @Composable
 fun SendMoneyScreen(senderUid: String) {
@@ -997,12 +1082,30 @@ fun QRCodeScreen(uid: String, onBack: () -> Unit) {
         ) {
             Text("Scan this to send money", style = MaterialTheme.typography.headlineSmall)
             Spacer(modifier = Modifier.height(24.dp))
-            qrCodeBitmap?.let {
+
+            qrCodeBitmap?.let { bitmap ->
                 Image(
-                    bitmap = it.asImageBitmap(),
+                    bitmap = bitmap.asImageBitmap(),
                     contentDescription = "QR Code",
                     modifier = Modifier.size(250.dp)
                 )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // ✅ Row with Download & Share buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Button(onClick = {
+                        saveQRCodeToGallery(context, bitmap, "qr_code_${System.currentTimeMillis()}.png")
+                    }) {
+                        Text("Download QR")
+                    }
+
+                    Button(onClick = {
+                        shareQRCode(context, bitmap)
+                    }) {
+                        Text("Share QR")
+                    }
+                }
             }
         }
     }
@@ -1010,24 +1113,7 @@ fun QRCodeScreen(uid: String, onBack: () -> Unit) {
 
 
 
-fun generateQRCode(text: String, context: Context): Bitmap? {
-    return try {
-        val writer = QRCodeWriter()
-        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 512, 512)
-        val width = bitMatrix.width
-        val height = bitMatrix.height
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-        for (x in 0 until width) {
-            for (y in 0 until height) {
-                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-            }
-        }
-        bmp
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
+
 
 fun changePin(context: Context, userId: String) {
     val currentInput = EditText(context)

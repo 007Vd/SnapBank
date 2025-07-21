@@ -92,6 +92,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.android.gms:play-services-auth:21.1.0")
 
+    //
+    implementation("androidx.core:core-ktx:1.12.0")
     // ✅ Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
