@@ -1,6 +1,8 @@
 package com.example.snapbank
 
+
 import android.app.Activity
+import com.example.snapbank.TransactionPage
 import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
@@ -279,8 +281,6 @@ fun verifyPin(context: Context, userId: String, onSuccess: () -> Unit) {
 fun MainNavigationScreen(uid: String) {
     var selectedTab by remember { mutableStateOf(0) }
     val context = LocalContext.current
-
-    // ✅ Added Keeper tab
     val tabItems = listOf("Dashboard", "Transactions", "Send", "Keeper", "Settings")
 
     Scaffold(
@@ -291,7 +291,6 @@ fun MainNavigationScreen(uid: String) {
                         selected = selectedTab == index,
                         onClick = {
                             if (label == "Keeper") {
-                                // ✅ Step 3: Ask PIN before switching to Keeper tab
                                 verifyPin(context, uid) {
                                     selectedTab = index
                                 }
@@ -304,14 +303,14 @@ fun MainNavigationScreen(uid: String) {
                                 "Dashboard" -> Icon(Icons.Filled.Home, contentDescription = label)
                                 "Transactions" -> Icon(Icons.Filled.List, contentDescription = label)
                                 "Send" -> Icon(Icons.Filled.Send, contentDescription = label)
-                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label) // 🔐 Keeper Icon
+                                "Keeper" -> Icon(Icons.Filled.Lock, contentDescription = label)
                                 "Settings" -> Icon(Icons.Filled.Settings, contentDescription = label)
                                 else -> Icon(Icons.Filled.Info, contentDescription = label)
                             }
                         },
-                        label = { Text(
-                            text = label,
-                            fontSize = 10.sp) }
+                        label = {
+                            Text(text = label, fontSize = 10.sp)
+                        }
                     )
                 }
             }
@@ -320,120 +319,14 @@ fun MainNavigationScreen(uid: String) {
         Box(modifier = Modifier.padding(padding)) {
             when (selectedTab) {
                 0 -> DashboardScreen(uid)
-                1 -> TransactionsScreen(uid)
+                1 -> TransactionPage(uid)  // ✅ Updated to use new TransactionPage
                 2 -> SendMoneyScreen(uid)
-                3 -> KeeperScreen(uid) // ✅ New Keeper Screen
+                3 -> KeeperScreen(uid)
                 4 -> SettingsScreen()
             }
         }
     }
 }
-
-
-
-@Composable
-fun TransactionsScreen(uid: String) {
-    var transactions by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf("") }
-    val db = FirebaseFirestore.getInstance()
-
-    LaunchedEffect(Unit) {
-        db.collection("users").document(uid)
-            .collection("transactions")
-            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-            .get()
-            .addOnSuccessListener { docs ->
-                transactions = docs.mapNotNull { doc ->
-                    val type = doc.getString("type") ?: return@mapNotNull null
-                    val amount = doc.getLong("amount") ?: return@mapNotNull null
-                    val timestamp = doc.getLong("timestamp") ?: return@mapNotNull null
-                    mapOf(
-                        "type" to type,
-                        "amount" to amount,
-                        "timestamp" to timestamp
-                    )
-                }
-                isLoading = false
-            }
-            .addOnFailureListener { exception ->
-                errorMessage = "Failed to load transactions: ${exception.message}"
-                isLoading = false
-                Log.e("TRANSACTIONS", "Error loading transactions", exception)
-            }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(color = Color(0xFFD2A679))
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-
-    ) {
-        Text("📜 Transaction History", fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        when {
-            isLoading -> {
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-            errorMessage.isNotEmpty() -> {
-                Text(
-                    text = "❌ $errorMessage",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-            transactions.isEmpty() -> {
-                Text(
-                    text = "💳 No transactions yet",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            else -> {
-                transactions.forEach { transaction ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        colors = CardDefaults.elevatedCardColors(containerColor = Color.DarkGray, contentColor = Color.White),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-
-                        ) {
-                        Row(modifier = Modifier,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Image(
-                                painter = painterResource(R.drawable.pngtree_instagram_bule_tick_insta_blue_star_vector_png_image_6695210),
-                                contentDescription = null,
-                                modifier = Modifier.size(50.dp),
-                                contentScale = ContentScale.Fit
-                            )
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Text(
-                                    text = transaction["type"] as String,
-                                    fontSize = 16.sp
-                                )
-                                Text(
-                                    text = "₹${transaction["amount"]}",
-                                    fontSize = 14.sp,
-                                    color = Color.Yellow
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 @Composable
@@ -528,7 +421,6 @@ fun SendMoneyScreen(senderUid: String) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
-
         ) {
             Text("📤 Send Money", fontSize = 20.sp)
             Spacer(Modifier.height(16.dp))
@@ -561,7 +453,6 @@ fun SendMoneyScreen(senderUid: String) {
 
             Spacer(Modifier.height(16.dp))
 
-            // 📷 QR Code Scan Button
             Button(
                 onClick = { showScanner = true },
                 modifier = Modifier.fillMaxWidth()
@@ -575,22 +466,15 @@ fun SendMoneyScreen(senderUid: String) {
                 onClick = {
                     val amount = amountText.toLongOrNull()
                     when {
-                        recipient.isBlank() -> {
-                            status = "⚠ Please enter recipient phone"
-                        }
-                        !recipient.startsWith("+91") || recipient.length != 13 -> {
-                            status = "⚠ Enter valid 10-digit phone with +91 prefix"
-                        }
-                        amount == null || amount <= 0 -> {
-                            status = "⚠ Please enter a valid amount"
-                        }
-                        amount > 100000 -> {
-                            status = "⚠ Maximum transfer limit is ₹1,00,000"
-                        }
+                        recipient.isBlank() -> status = "⚠ Please enter recipient phone"
+                        !recipient.startsWith("+91") || recipient.length != 13 -> status = "⚠ Enter valid 10-digit phone with +91 prefix"
+                        amount == null || amount <= 0 -> status = "⚠ Please enter a valid amount"
+                        amount > 100000 -> status = "⚠ Maximum transfer limit is ₹1,00,000"
                         else -> {
                             verifyPin(context, senderUid) {
                                 sending = true
                                 performMoneyTransfer(senderUid, recipient, amount, db, context) { success, message ->
+
                                     sending = false
                                     status = message
                                     if (success) {
@@ -612,15 +496,12 @@ fun SendMoneyScreen(senderUid: String) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = status,
-                    color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error
+                    color = if (status.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                 )
             }
         }
     }
 }
-
-
 
 private fun performMoneyTransfer(
     senderUid: String,
@@ -657,26 +538,25 @@ private fun performMoneyTransfer(
                 val senderBalance = senderSnapshot.getLong("balance") ?: 0L
                 val recipientBalance = recipientSnapshot.getLong("balance") ?: 0L
 
-                if (senderBalance < amount) {
-                    throw Exception("Insufficient balance")
-                }
+                if (senderBalance < amount) throw Exception("Insufficient balance")
 
-                // Update balances
                 transaction.update(senderRef, "balance", senderBalance - amount)
                 transaction.update(recipientRef, "balance", recipientBalance + amount)
 
-                // Create transaction records
                 val timestamp = System.currentTimeMillis()
                 val senderTxn = hashMapOf(
-                    "type" to "Sent to ${recipientDoc.getString("name") ?: "Unknown"}"
-                    ,
+                    "type" to "Sent",
                     "amount" to amount,
-                    "timestamp" to timestamp
+                    "timestamp" to timestamp,
+                    "name" to (recipientDoc.getString("name") ?: ""),
+                    "phone" to (recipientDoc.getString("phone") ?: "")
                 )
                 val recipientTxn = hashMapOf(
-                    "type" to "Received from ${senderSnapshot.getString("username") ?: "Unknown"}",
+                    "type" to "Received",
                     "amount" to amount,
-                    "timestamp" to timestamp
+                    "timestamp" to timestamp,
+                    "name" to (senderSnapshot.getString("username") ?: ""),
+                    "phone" to (senderSnapshot.getString("phone") ?: "")
                 )
 
                 transaction.set(senderRef.collection("transactions").document(), senderTxn)
@@ -686,17 +566,8 @@ private fun performMoneyTransfer(
                 onComplete(true, successMessage)
                 Toast.makeText(context, successMessage, Toast.LENGTH_SHORT).show()
             }.addOnFailureListener { exception ->
-                val errorMessage = when (exception) {
-                    is FirebaseFirestoreException -> {
-                        when (exception.code) {
-                            FirebaseFirestoreException.Code.PERMISSION_DENIED -> "❌ Permission denied"
-                            FirebaseFirestoreException.Code.UNAVAILABLE -> "❌ Service unavailable"
-                            else -> "❌ ${exception.message}"
-                        }
-                    }
-                    else -> "❌ ${exception.message}"
-                }
-                onComplete(false, errorMessage)
+                val errorMessage = exception.message ?: "Transaction failed"
+                onComplete(false, "❌ $errorMessage")
                 Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
                 Log.e("SEND_MONEY", "Transfer failed", exception)
             }
@@ -707,6 +578,10 @@ private fun performMoneyTransfer(
             Log.e("SEND_MONEY", "User lookup failed", exception)
         }
 }
+
+
+
+
 
 
 @Composable
