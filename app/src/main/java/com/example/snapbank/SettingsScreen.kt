@@ -9,8 +9,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -44,6 +46,7 @@ fun SettingsScreen(
     var notificationsEnabled by remember { mutableStateOf(true) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     // Gradient background
     val gradient = Brush.verticalGradient(
@@ -59,6 +62,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(scrollState)
                 .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
                 .padding(16.dp)
         ) {
