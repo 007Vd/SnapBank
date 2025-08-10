@@ -61,6 +61,8 @@ dependencies {
 // ✅ Shimmer Effect
     // ✅ Coil for Jetpack Compose
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
     implementation("androidx.compose.material3:material3:1.2.1") // or latest stable
 //    implementation("androidx.compose.material3:material3-pullrefresh:1.2.1") // ✅ REQUIRED
